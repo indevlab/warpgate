@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.22.0-beta.4-17-g75b5fc29-modified"
+    "version": "v0.22.0-beta.5-2-g1fc7f39-modified"
   },
   "servers": [
     {
@@ -1371,6 +1371,10 @@
           "kubernetes": {
             "type": "integer",
             "format": "uint16"
+          },
+          "rdp": {
+            "type": "integer",
+            "format": "uint16"
           }
         }
       },
@@ -1450,7 +1454,8 @@
           "Kubernetes",
           "MySql",
           "Ssh",
-          "Postgres"
+          "Postgres",
+          "Rdp"
         ]
       },
       "TargetSnapshot": {
@@ -1527,6 +1532,12 @@
             }
           },
           "postgres": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "rdp": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"

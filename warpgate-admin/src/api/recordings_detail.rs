@@ -202,6 +202,40 @@ pub async fn api_get_recording_tcpdump(
 }
 
 #[handler]
+pub async fn api_get_recording_rdp(
+    ctx: Data<&AuthenticatedRequestContext>,
+    id: poem::web::Path<Uuid>,
+) -> poem::Result<poem::Response> {
+    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+    let db = ctx.services.db.lock().await;
+
+    let recording = Recording::Entity::find_by_id(id.0)
+        .filter(Recording::Column::Kind.eq(RecordingKind::Rdp))
+        .one(&*db)
+        .await
+        .map_err(InternalServerError)?;
+
+    let Some(recording) = recording else {
+        return Err(NotFoundError.into());
+    };
+
+    let path = {
+        ctx.services
+            .recordings
+            .lock()
+            .await
+            .path_for(&recording.session_id, &recording.name)
+    };
+
+    let content = std::fs::read(path).map_err(InternalServerError)?;
+
+    Ok(poem::Response::builder()
+        .header("Content-Type", "application/x-ndjson")
+        .body(content))
+}
+
+#[handler]
 pub async fn api_get_recording_stream(
     ws: WebSocket,
     ctx: Data<&AuthenticatedRequestContext>,

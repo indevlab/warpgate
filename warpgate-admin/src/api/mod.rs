@@ -12,6 +12,7 @@ mod pagination;
 mod parameters;
 mod password_credentials;
 mod public_key_credentials;
+mod rdp_known_hosts;
 pub mod recordings_detail;
 mod roles;
 mod sessions_detail;
@@ -68,6 +69,7 @@ pub fn get() -> impl OpenApi {
         (
             certificate_credentials::ListApi,
             certificate_credentials::DetailApi,
+            rdp_known_hosts::Api,
         ),
     )
 }

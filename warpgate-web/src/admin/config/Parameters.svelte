@@ -111,6 +111,44 @@
                 Disabling password authentication can help prevent brute-force attacks.
             </InfoBox>
 
+            <h4 class="mt-4">RDP</h4>
+            <!-- svelte-ignore a11y_label_has_associated_control -->
+            <label class="mb-2">Allowed authentication methods</label>
+            <label
+                for="rdpClientAuthNla"
+                class="d-flex align-items-center mb-2"
+            >
+                <Input
+                    id="rdpClientAuthNla"
+                    class="mb-0 me-2"
+                    type="switch"
+                    on:change={() => {
+                        parameters!.rdpClientAuthNla = !parameters!.rdpClientAuthNla
+                        update()
+                    }}
+                    checked={parameters.rdpClientAuthNla} />
+                <div>NLA (Network Level Authentication / CredSSP)</div>
+            </label>
+            <label
+                for="rdpClientAuthLegacy"
+                class="d-flex align-items-center"
+            >
+                <Input
+                    id="rdpClientAuthLegacy"
+                    class="mb-0 me-2"
+                    type="switch"
+                    on:change={() => {
+                        parameters!.rdpClientAuthLegacy = !parameters!.rdpClientAuthLegacy
+                        update()
+                    }}
+                    checked={parameters.rdpClientAuthLegacy} />
+                <div>Legacy (Standard Security)</div>
+            </label>
+            <InfoBox class="mt-3 mb-3">
+                Controls which authentication methods are offered to RDP clients.
+                At least one method must be enabled.
+            </InfoBox>
+
             {#if hasSsoProviders}
             <h4 class="mt-4">Login</h4>
             <label

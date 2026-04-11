@@ -13,7 +13,7 @@ env:
   REGISTRY: ghcr.io
   CHART_NAME: warpgate
   CHART_PATH: helm/warpgate
-  OCI_REPO: oci://ghcr.io/warp-tech/helm-charts
+  OCI_REPO: oci://ghcr.io/indevlab/helm-charts
 
 jobs:
   lint:

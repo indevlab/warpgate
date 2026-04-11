@@ -71,6 +71,20 @@
         "listen": "[::]:55432"
       }
     },
+    "rdp": {
+      "$ref": "#/$defs/RdpConfig",
+      "default": {
+        "certificate": "rdp-certificate.pem",
+        "enable": false,
+        "external_host": null,
+        "external_port": null,
+        "inactivity_timeout": "5m",
+        "keepalive_interval": null,
+        "key": "rdp-key.pem",
+        "listen": "[::]:33389",
+        "tls_mode": "required"
+      }
+    },
     "recordings": {
       "$ref": "#/$defs/RecordingsConfig",
       "default": {
@@ -323,6 +337,70 @@
           "default": "[::]:55432"
         }
       }
+    },
+    "RdpConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "type": "string",
+          "default": "rdp-certificate.pem"
+        },
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "inactivity_timeout": {
+          "type": "string",
+          "default": "5m"
+        },
+        "keepalive_interval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "key": {
+          "type": "string",
+          "default": "rdp-key.pem"
+        },
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:33389"
+        },
+        "tls_mode": {
+          "$ref": "#/$defs/RdpTlsMode",
+          "default": "required"
+        }
+      }
+    },
+    "RdpTlsMode": {
+      "type": "string",
+      "enum": [
+        "required",
+        "preferred"
+      ]
     },
     "RecordingsConfig": {
       "type": "object",

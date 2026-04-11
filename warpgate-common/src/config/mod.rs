@@ -8,7 +8,8 @@ use std::time::Duration;
 use defaults::{
     _default_audit_retention, _default_cookie_max_age, _default_database_url, _default_false,
     _default_http_listen, _default_kubernetes_listen, _default_mysql_listen,
-    _default_postgres_listen, _default_recordings_path, _default_retention,
+    _default_postgres_listen, _default_rdp_certificate_path, _default_rdp_inactivity_timeout,
+    _default_rdp_key_path, _default_rdp_listen, _default_recordings_path, _default_retention,
     _default_session_max_age, _default_ssh_inactivity_timeout, _default_ssh_keys_path,
     _default_ssh_listen,
 };
@@ -103,6 +104,8 @@ pub struct UserRequireCredentialsPolicy {
     pub mysql: Option<Vec<CredentialKind>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub postgres: Option<Vec<CredentialKind>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rdp: Option<Vec<CredentialKind>>,
 }
 
 impl UserRequireCredentialsPolicy {
@@ -556,6 +559,71 @@ impl PostgresConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RdpTlsMode {
+    #[default]
+    Required,
+    Preferred,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct RdpConfig {
+    #[serde(default = "_default_false")]
+    pub enable: bool,
+
+    #[serde(default = "_default_rdp_listen")]
+    pub listen: ListenEndpoint,
+
+    #[serde(default)]
+    pub external_port: Option<u16>,
+
+    #[serde(default)]
+    pub external_host: Option<String>,
+
+    #[serde(default = "_default_rdp_certificate_path")]
+    pub certificate: String,
+
+    #[serde(default = "_default_rdp_key_path")]
+    pub key: String,
+
+    #[serde(default)]
+    pub tls_mode: RdpTlsMode,
+
+    #[serde(default = "_default_rdp_inactivity_timeout", with = "humantime_serde")]
+    #[schemars(with = "String")]
+    pub inactivity_timeout: Duration,
+
+    #[serde(default)]
+    pub keepalive_interval: Option<Duration>,
+}
+
+impl Default for RdpConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            listen: _default_rdp_listen(),
+            external_port: None,
+            external_host: None,
+            certificate: _default_rdp_certificate_path(),
+            key: _default_rdp_key_path(),
+            tls_mode: <_>::default(),
+            inactivity_timeout: _default_rdp_inactivity_timeout(),
+            keepalive_interval: None,
+        }
+    }
+}
+
+impl RdpConfig {
+    pub fn external_port(&self) -> u16 {
+        self.external_port.unwrap_or_else(|| self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct RecordingsConfig {
     #[serde(default = "_default_false")]
@@ -633,6 +701,9 @@ pub struct WarpgateConfigStore {
     pub postgres: PostgresConfig,
 
     #[serde(default)]
+    pub rdp: RdpConfig,
+
+    #[serde(default)]
     pub log: LogConfig,
 }
 
@@ -648,6 +719,7 @@ impl Default for WarpgateConfigStore {
             kubernetes: <_>::default(),
             mysql: <_>::default(),
             postgres: <_>::default(),
+            rdp: <_>::default(),
             log: <_>::default(),
         }
     }

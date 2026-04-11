@@ -43,6 +43,7 @@ warpgate-core = { path = "../warpgate-core" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 warpgate-protocol-http = { path = "../warpgate-protocol-http" }
 warpgate-protocol-mysql = { path = "../warpgate-protocol-mysql" }
+warpgate-protocol-rdp = { path = "../warpgate-protocol-rdp" }
 warpgate-protocol-postgres = { path = "../warpgate-protocol-postgres" }
 warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-protocol-kubernetes = { path = "../warpgate-protocol-kubernetes" }

@@ -13,6 +13,7 @@ use warpgate_protocol_http::HTTPProtocolServer;
 use warpgate_protocol_kubernetes::KubernetesProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
 use warpgate_protocol_postgres::PostgresProtocolServer;
+use warpgate_protocol_rdp::RDPProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
 
 use crate::config::{load_config, watch_config};
@@ -92,6 +93,16 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
             run_protocol_server(
                 PostgresProtocolServer::new(&services),
                 config.store.postgres.listen.clone(),
+            )
+            .boxed(),
+        );
+    }
+
+    if config.store.rdp.enable {
+        protocol_futures.push(
+            run_protocol_server(
+                RDPProtocolServer::new(&services),
+                config.store.rdp.listen.clone(),
             )
             .boxed(),
         );

@@ -17,6 +17,8 @@ pub enum TargetKind {
     Ssh,
     #[sea_orm(string_value = "postgres")]
     Postgres,
+    #[sea_orm(string_value = "rdp")]
+    Rdp,
 }
 
 impl From<&TargetOptions> for TargetKind {
@@ -27,6 +29,7 @@ impl From<&TargetOptions> for TargetKind {
             TargetOptions::MySql(_) => Self::MySql,
             TargetOptions::Postgres(_) => Self::Postgres,
             TargetOptions::Ssh(_) => Self::Ssh,
+            TargetOptions::Rdp(_) => Self::Rdp,
         }
     }
 }

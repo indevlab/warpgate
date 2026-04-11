@@ -14,6 +14,8 @@ pub enum RecordingKind {
     Traffic,
     #[sea_orm(string_value = "kubernetes")]
     Kubernetes,
+    #[sea_orm(string_value = "rdp")]
+    Rdp,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]

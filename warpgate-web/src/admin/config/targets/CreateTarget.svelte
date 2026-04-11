@@ -74,6 +74,14 @@
                         privateKey: '',
                     },
                 },
+                Rdp: {
+                    kind: TargetKind.Rdp,
+                    host: '192.168.0.1',
+                    port: 3389,
+                    username: 'administrator',
+                    password: '',
+                    tlsMode: 'Required' as const,
+                },
             }[params.kind]
             if (!options) {
                 return

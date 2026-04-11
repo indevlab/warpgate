@@ -144,6 +144,9 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                 {#if target.kind === TargetKind.Kubernetes}
                     Kubernetes
                 {/if}
+                {#if target.kind === TargetKind.Rdp}
+                    RDP
+                {/if}
             </small>
             {#if target.kind === TargetKind.Http}
                 <Fa icon={faArrowRight} fw />

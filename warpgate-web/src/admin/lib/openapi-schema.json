@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.22.0-beta.4-17-g75b5fc29-modified"
+    "version": "v0.22.0-beta.5-2-g1fc7f39-modified"
   },
   "servers": [
     {
@@ -3536,6 +3536,16 @@
         "responses": {
           "201": {
             "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3788,10 +3798,217 @@
         ],
         "operationId": "revoke_certificate_credential"
       }
+    },
+    "/targets/{id}/rdp-known-hosts": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RdpKnownHostListItem"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_rdp_known_hosts"
+      },
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/AddRdpKnownHostRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RdpKnownHost"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "add_rdp_known_host"
+      }
+    },
+    "/targets/{id}/rdp-known-hosts/{sha256}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "sha256",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RdpKnownHost"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_rdp_known_host"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "sha256",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_rdp_known_host"
+      }
     }
   },
   "components": {
     "schemas": {
+      "AddRdpKnownHostRequest": {
+        "type": "object",
+        "title": "AddRdpKnownHostRequest",
+        "required": [
+          "host",
+          "port",
+          "certificate_sha256"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "certificate_sha256": {
+            "type": "string"
+          },
+          "certificate_der_base64": {
+            "type": "string"
+          }
+        }
+      },
       "AddSshKnownHostRequest": {
         "type": "object",
         "title": "AddSshKnownHostRequest",
@@ -4754,6 +4971,12 @@
           },
           "minimize_password_login": {
             "type": "boolean"
+          },
+          "rdp_client_auth_nla": {
+            "type": "boolean"
+          },
+          "rdp_client_auth_legacy": {
+            "type": "boolean"
           }
         }
       },
@@ -4765,7 +4988,9 @@
           "ssh_client_auth_publickey",
           "ssh_client_auth_password",
           "ssh_client_auth_keyboard_interactive",
-          "minimize_password_login"
+          "minimize_password_login",
+          "rdp_client_auth_nla",
+          "rdp_client_auth_legacy"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -4786,6 +5011,99 @@
           },
           "minimize_password_login": {
             "type": "boolean"
+          },
+          "rdp_client_auth_nla": {
+            "type": "boolean"
+          },
+          "rdp_client_auth_legacy": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RdpKnownHost": {
+        "type": "object",
+        "title": "RdpKnownHost",
+        "required": [
+          "id",
+          "target_id",
+          "host",
+          "port",
+          "certificate_sha256",
+          "certificate_der_base64",
+          "created",
+          "updated"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "certificate_sha256": {
+            "type": "string"
+          },
+          "certificate_der_base64": {
+            "type": "string"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RdpKnownHostListItem": {
+        "type": "object",
+        "title": "RdpKnownHostListItem",
+        "description": "List response that omits the full certificate DER bytes.",
+        "required": [
+          "id",
+          "target_id",
+          "host",
+          "port",
+          "certificate_sha256",
+          "created",
+          "updated"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "certificate_sha256": {
+            "type": "string"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -4833,7 +5151,8 @@
         "enum": [
           "Terminal",
           "Traffic",
-          "Kubernetes"
+          "Kubernetes",
+          "Rdp"
         ]
       },
       "Role": {
@@ -5234,6 +5553,9 @@
           },
           {
             "$ref": "#/components/schemas/TargetOptions_TargetPostgresOptions"
+          },
+          {
+            "$ref": "#/components/schemas/TargetOptions_TargetRDPOptions"
           }
         ],
         "discriminator": {
@@ -5243,7 +5565,8 @@
             "Http": "#/components/schemas/TargetOptions_TargetHTTPOptions",
             "Kubernetes": "#/components/schemas/TargetOptions_TargetKubernetesOptions",
             "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
-            "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions"
+            "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions",
+            "Rdp": "#/components/schemas/TargetOptions_TargetRDPOptions"
           }
         }
       },
@@ -5335,6 +5658,28 @@
           }
         ]
       },
+      "TargetOptions_TargetRDPOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Rdp"
+                ],
+                "example": "Rdp"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetRDPOptions"
+          }
+        ]
+      },
       "TargetOptions_TargetSSHOptions": {
         "allOf": [
           {
@@ -5390,6 +5735,45 @@
             "type": "string"
           }
         }
+      },
+      "TargetRDPOptions": {
+        "type": "object",
+        "title": "TargetRDPOptions",
+        "required": [
+          "host",
+          "port",
+          "username",
+          "password",
+          "tls_mode"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "tls_mode": {
+            "$ref": "#/components/schemas/TargetRDPTlsMode"
+          }
+        }
+      },
+      "TargetRDPTlsMode": {
+        "type": "string",
+        "enum": [
+          "Required",
+          "Preferred"
+        ]
       },
       "TargetSSHOptions": {
         "type": "object",
@@ -5732,6 +6116,12 @@
             }
           },
           "postgres": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "rdp": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"

@@ -35,6 +35,11 @@
             description: 'Expose Kubernetes API protocol for tools like kubectl',
             experimental: true,
         },
+        {
+            name: 'RDP',
+            value: TargetKind.Rdp,
+            description: 'Expose access to Windows Remote Desktop',
+        },
     ]
 </script>
 

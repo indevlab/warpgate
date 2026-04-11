@@ -23,6 +23,7 @@ pub struct PortsInfo {
     mysql: Option<u16>,
     postgres: Option<u16>,
     kubernetes: Option<u16>,
+    rdp: Option<u16>,
 }
 
 #[derive(Serialize, Object)]
@@ -276,6 +277,11 @@ impl Api {
                     } else {
                         None
                     },
+                    rdp: if config.store.rdp.enable {
+                        Some(config.store.rdp.external_port())
+                    } else {
+                        None
+                    },
                 }
             } else {
                 PortsInfo {
@@ -284,6 +290,7 @@ impl Api {
                     mysql: None,
                     postgres: None,
                     kubernetes: None,
+                    rdp: None,
                 }
             },
             own_credential_management_allowed: parameters.allow_own_credential_management,

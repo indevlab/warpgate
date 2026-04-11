@@ -14,7 +14,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket};
+use warpgate_db_entities::{KnownHost, RdpKnownHost, Role, Target, TargetRoleAssignment, Ticket};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -288,6 +288,13 @@ impl DetailApi {
                     .exec(&*db)
                     .await?;
             }
+        }
+
+        if target.kind == TargetKind::Rdp {
+            RdpKnownHost::Entity::delete_many()
+                .filter(RdpKnownHost::Column::TargetId.eq(target.id))
+                .exec(&*db)
+                .await?;
         }
 
         target.delete(&*db).await?;

@@ -85,6 +85,7 @@ class WarpgateProcess:
     mysql_port: int
     postgres_port: int
     kubernetes_port: int
+    rdp_port: int = 0
 
 
 class ProcessManager:
@@ -165,6 +166,23 @@ class ProcessManager:
                 "warpgate-e2e-ssh-server",
                 "-f",
                 str(config_path),
+            ]
+        )
+        return port
+
+    def start_rdp_server(self):
+        port = alloc_port()
+        container_name = f"warpgate-e2e-rdp-server-{uuid.uuid4()}"
+        self.start(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                container_name,
+                "-p",
+                f"{port}:3389",
+                "warpgate-e2e-rdp-server",
             ]
         )
         return port
@@ -607,12 +625,14 @@ class ProcessManager:
             postgres_port = share_with.postgres_port
             http_port = share_with.http_port
             kubernetes_port = share_with.kubernetes_port
+            rdp_port = share_with.rdp_port
         else:
             ssh_port = alloc_port()
             http_port = http_port or alloc_port()
             mysql_port = alloc_port()
             postgres_port = alloc_port()
             kubernetes_port = alloc_port()
+            rdp_port = alloc_port()
 
             data_dir = self.ctx.tmpdir / f"wg-data-{uuid.uuid4()}"
             data_dir.mkdir(parents=True)
@@ -686,6 +706,10 @@ class ProcessManager:
 
             config = yaml.safe_load(config_path.open())
             config["ssh"]["host_key_verification"] = "auto_accept"
+            config.setdefault("store", {})["rdp"] = {
+                "enable": True,
+                "listen": f"0.0.0.0:{rdp_port}",
+            }
             if config_patch:
                 always_merger.merge(config, config_patch)
             with config_path.open("w") as f:
@@ -700,6 +724,7 @@ class ProcessManager:
             mysql_port=mysql_port,
             postgres_port=postgres_port,
             kubernetes_port=kubernetes_port,
+            rdp_port=rdp_port,
         )
 
     def start_ssh_client(self, *args, password=None, **kwargs):

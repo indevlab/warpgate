@@ -45,7 +45,7 @@ Warpgate is a smart & fully transparent SSH, HTTPS, Kubernetes, MySQL, PostgreSQ
 
 * See the [Getting started](https://warpgate.null.page/getting-started/) docs page (or [Getting started on Docker](https://warpgate.null.page/getting-started-on-docker/)).
 * [Release / beta binaries](https://github.com/warp-tech/warpgate/releases)
-* [Nightly builds](https://nightly.link/warp-tech/warpgate/workflows/build/main)
+* [Nightly builds](https://nightly.link/indevlab/warpgate/workflows/build/main)
 
 ## How is Warpgate different from a jump host / VPN / Teleport?
 

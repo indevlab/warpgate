@@ -321,6 +321,23 @@
 </div>
 {/if}
 
+{#if targetKind === TargetKind.Rdp}
+    <h4 class="mb-3">Connect with an RDP client</h4>
+    <FormGroup floating label="RDP username" class="d-flex align-items-center">
+        <input type="text" class="form-control" readonly value={`${username ?? 'user'}#${targetName ?? 'target'}`} />
+        <CopyButton text={`${username ?? 'user'}#${targetName ?? 'target'}`} />
+    </FormGroup>
+
+    <FormGroup floating label="Server address" class="d-flex align-items-center">
+        <input type="text" class="form-control" readonly value={`${$serverInfo?.externalHost ?? 'warpgate-host'}:${$serverInfo?.ports?.rdp ?? 3389}`} />
+        <CopyButton text={`${$serverInfo?.externalHost ?? 'warpgate-host'}:${$serverInfo?.ports?.rdp ?? 3389}`} />
+    </FormGroup>
+
+    <InfoBox class="mt-3">
+        Use your Warpgate password when prompted. The username format is <code>user#target</code>.
+    </InfoBox>
+{/if}
+
 {#if issuingCertificate}
 <CertificateCredentialModal
     bind:isOpen={issuingCertificate}

@@ -7,7 +7,8 @@ use warpgate_tls::TlsMode;
 
 use super::defaults::{
     _default_empty_string, _default_empty_vec, _default_mysql_port,
-    _default_postgres_idle_timeout_str, _default_ssh_port, _default_true, _default_username,
+    _default_postgres_idle_timeout_str, _default_rdp_port, _default_ssh_port, _default_true,
+    _default_username,
 };
 use crate::Secret;
 
@@ -175,6 +176,31 @@ impl Default for KubernetesTargetAuth {
     }
 }
 
+#[derive(
+    Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq, poem_openapi::Enum,
+)]
+pub enum TargetRDPTlsMode {
+    #[serde(rename = "required")]
+    #[default]
+    Required,
+    #[serde(rename = "preferred")]
+    Preferred,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct TargetRDPOptions {
+    pub host: String,
+    #[serde(default = "_default_rdp_port")]
+    pub port: u16,
+    #[serde(default = "_default_username")]
+    pub username: String,
+    pub password: Secret<String>,
+    #[serde(default)]
+    pub domain: Option<String>,
+    #[serde(default)]
+    pub tls_mode: TargetRDPTlsMode,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct Target {
     #[serde(default)]
@@ -202,4 +228,6 @@ pub enum TargetOptions {
     MySql(TargetMySqlOptions),
     #[serde(rename = "postgres")]
     Postgres(TargetPostgresOptions),
+    #[serde(rename = "rdp")]
+    Rdp(TargetRDPOptions),
 }

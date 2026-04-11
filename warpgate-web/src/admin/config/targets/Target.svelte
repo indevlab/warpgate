@@ -13,6 +13,7 @@
     import Loadable from 'common/Loadable.svelte'
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
+    import RdpKnownCerts from './rdp/KnownCerts.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
 
     interface Props {
@@ -88,7 +89,7 @@
                 Access instructions
             </ModalHeader>
             <ModalBody>
-                {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres' || target.options.kind === 'Kubernetes'}
+                {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres' || target.options.kind === 'Kubernetes' || target.options.kind === 'Rdp'}
                     <Loadable promise={api.getUsers()}>
                         {#snippet children(users)}
                             <FormGroup floating label="Select a user">
@@ -146,6 +147,9 @@
                     {/if}
                     {#if target.options.kind === 'Kubernetes'}
                         Kubernetes target
+                    {/if}
+                    {#if target.options.kind === 'Rdp'}
+                        RDP target
                     {/if}
                 </div>
             </div>
@@ -224,6 +228,47 @@
             </div>
 
             <TlsConfiguration bind:value={target.options.tls} />
+        {/if}
+
+        {#if target.options.kind === 'Rdp'}
+            <div class="row">
+                <div class="col-8">
+                    <FormGroup floating label="Target host">
+                        <input class="form-control" bind:value={target.options.host} />
+                    </FormGroup>
+                </div>
+                <div class="col-4">
+                    <FormGroup floating label="Target port">
+                        <input class="form-control" type="number" bind:value={target.options.port} min="1" max="65535" step="1" />
+                    </FormGroup>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col">
+                    <FormGroup floating label="Username">
+                        <input class="form-control" bind:value={target.options.username} />
+                    </FormGroup>
+                </div>
+                <div class="col">
+                    <FormGroup floating label="Password">
+                        <input class="form-control" type="password" autocomplete="off" bind:value={target.options.password} />
+                    </FormGroup>
+                </div>
+            </div>
+
+            <FormGroup floating label="Domain (optional)">
+                <input class="form-control" bind:value={target.options.domain} placeholder="WORKGROUP" />
+            </FormGroup>
+
+            <FormGroup floating label="TLS mode">
+                <select class="form-control" bind:value={target.options.tlsMode}>
+                    <option value="Required">Required</option>
+                    <option value="Preferred">Preferred</option>
+                </select>
+            </FormGroup>
+
+            <RdpKnownCerts id={target.id} />
         {/if}
 
         {#if target.options.kind === 'Kubernetes'}

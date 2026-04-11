@@ -320,7 +320,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     println!("{yaml}");
 
     let yaml = format!(
-        "# Config generated in version {version}\n# yaml-language-server: $schema=https://raw.githubusercontent.com/warp-tech/warpgate/refs/heads/main/config-schema.json\n\n{yaml}",
+        "# Config generated in version {version}\n# yaml-language-server: $schema=https://raw.githubusercontent.com/indevlab/warpgate/refs/heads/main/config-schema.json\n\n{yaml}",
         version = warpgate_version()
     );
 
@@ -366,7 +366,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     info!("");
     info!("You can now start Warpgate with:");
     if is_docker() {
-        info!("docker run -p 8888:8888 -p 2222:2222 -it -v <your data dir>:/data ghcr.io/warp-tech/warpgate");
+        info!("docker run -p 8888:8888 -p 2222:2222 -it -v <your data dir>:/data ghcr.io/indevlab/warpgate");
     } else {
         info!(
             "  {} --config {} run",

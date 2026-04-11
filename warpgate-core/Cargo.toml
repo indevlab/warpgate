@@ -13,6 +13,7 @@ warpgate-ldap = { path = "../warpgate-ldap" }
 
 anyhow.workspace = true
 argon2 = "0.5"
+base64 = { version = "0.22", default-features = false, features = ["std"] }
 async-trait = "0.1"
 bytes.workspace = true
 data-encoding.workspace = true

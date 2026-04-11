@@ -84,6 +84,26 @@ pub const fn _default_empty_vec<T>() -> Vec<T> {
     vec![]
 }
 
+pub fn _default_rdp_listen() -> ListenEndpoint {
+    ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 33389))
+}
+
+pub const fn _default_rdp_port() -> u16 {
+    3389
+}
+
+pub fn _default_rdp_certificate_path() -> String {
+    "rdp-certificate.pem".to_owned()
+}
+
+pub fn _default_rdp_key_path() -> String {
+    "rdp-key.pem".to_owned()
+}
+
+pub const fn _default_rdp_inactivity_timeout() -> Duration {
+    Duration::from_secs(60 * 5)
+}
+
 pub fn _default_ssh_listen() -> ListenEndpoint {
     ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2222))
 }

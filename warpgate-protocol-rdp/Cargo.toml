@@ -1,0 +1,57 @@
+[package]
+edition = "2021"
+license = "Apache-2.0"
+name = "warpgate-protocol-rdp"
+version = "0.22.0-beta.5"
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+async-trait = { version = "0.1", default-features = false }
+bytes.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time = { version = "0.3", default-features = false }
+tokio.workspace = true
+tokio-rustls.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
+warpgate-tls = { path = "../warpgate-tls", default-features = false }
+
+# IronRDP 0.7 generation (stable RustCrypto, compatible with russh 0.60)
+ironrdp-acceptor = "0.7"
+ironrdp-async = "0.7"
+ironrdp-connector = "=0.7.0"
+ironrdp-core = "0.1"
+ironrdp-graphics = "0.6"
+ironrdp-pdu = "0.6"
+ironrdp-session = "0.7"
+ironrdp-svc = "0.5"
+ironrdp-tokio = "0.7"
+
+# CredSSP / NTLM / Kerberos for inbound NLA validation
+sspi = "0.16"
+
+# TLS cert handling, pinned to rc.17 (stable RustCrypto, no conflict with russh)
+picky = "=7.0.0-rc.17"
+
+# PNG encoding for recording frames
+image = { version = "0.25", default-features = false, features = ["png"] }
+png = "0.17"
+
+# Base64 encoding for recording data
+data-encoding.workspace = true
+
+aws-lc-rs = "1"
+hex.workspace = true
+rcgen.workspace = true
+rustls.workspace = true
+rustls-pki-types.workspace = true
+
+sea-orm.workspace = true

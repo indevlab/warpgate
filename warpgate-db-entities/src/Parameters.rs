@@ -17,6 +17,8 @@ pub struct Model {
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
     pub minimize_password_login: bool,
+    pub rdp_client_auth_nla: bool,
+    pub rdp_client_auth_legacy: bool,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -39,6 +41,8 @@ impl Entity {
                     ssh_client_auth_password: Set(true),
                     ssh_client_auth_keyboard_interactive: Set(true),
                     minimize_password_login: Set(false),
+                    rdp_client_auth_nla: Set(true),
+                    rdp_client_auth_legacy: Set(true),
                 }
                 .insert(db)
                 .await

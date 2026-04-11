@@ -21,6 +21,8 @@ struct ParameterValues {
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
     pub minimize_password_login: bool,
+    pub rdp_client_auth_nla: bool,
+    pub rdp_client_auth_legacy: bool,
 }
 
 #[derive(Serialize, Object)]
@@ -31,6 +33,8 @@ struct ParameterUpdate {
     pub ssh_client_auth_password: Option<bool>,
     pub ssh_client_auth_keyboard_interactive: Option<bool>,
     pub minimize_password_login: Option<bool>,
+    pub rdp_client_auth_nla: Option<bool>,
+    pub rdp_client_auth_legacy: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -43,6 +47,9 @@ enum GetParametersResponse {
 enum UpdateParametersResponse {
     #[oai(status = 201)]
     Done,
+
+    #[oai(status = 400)]
+    BadRequest(Json<String>),
 }
 
 #[OpenApi]
@@ -65,6 +72,8 @@ impl Api {
             ssh_client_auth_password: parameters.ssh_client_auth_password,
             ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
             minimize_password_login: parameters.minimize_password_login,
+            rdp_client_auth_nla: parameters.rdp_client_auth_nla,
+            rdp_client_auth_legacy: parameters.rdp_client_auth_legacy,
         })))
     }
 
@@ -94,6 +103,14 @@ impl Api {
             .ssh_client_auth_keyboard_interactive
             .map_or(NotSet, Set);
         parameters.minimize_password_login = body.minimize_password_login.map_or(NotSet, Set);
+        parameters.rdp_client_auth_nla = body.rdp_client_auth_nla.map_or(NotSet, Set);
+        parameters.rdp_client_auth_legacy = body.rdp_client_auth_legacy.map_or(NotSet, Set);
+
+        if body.rdp_client_auth_nla == Some(false) && body.rdp_client_auth_legacy == Some(false) {
+            return Ok(UpdateParametersResponse::BadRequest(Json(
+                "at least one RDP auth method must be enabled".into(),
+            )));
+        }
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
         drop(db);
