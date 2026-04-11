@@ -230,6 +230,41 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={204, 404},
     ),
     AdminApiTestCase(
+        id="add_rdp_known_host",
+        permission="config_edit",
+        call=lambda api, r: api.add_rdp_known_host_with_http_info(
+            r["target_id"],
+            sdk.AddRdpKnownHostRequest(
+                host="127.0.0.1",
+                port=3389,
+                certificate_sha256="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            ),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_rdp_known_hosts",
+        permission="config_edit",
+        call=lambda api, r: api.get_rdp_known_hosts_with_http_info(r["target_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_rdp_known_host",
+        permission="config_edit",
+        call=lambda api, r: api.get_rdp_known_host_with_http_info(
+            r["target_id"], "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="delete_rdp_known_host",
+        permission="config_edit",
+        call=lambda api, r: api.delete_rdp_known_host_with_http_info(
+            r["target_id"], "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        ),
+        expected_statuses={204, 404},
+    ),
+    AdminApiTestCase(
         id="get_ssh_own_keys",
         permission=None,
         call=lambda api, r: api.get_ssh_own_keys_with_http_info(),

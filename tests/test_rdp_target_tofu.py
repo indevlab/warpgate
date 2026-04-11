@@ -42,6 +42,7 @@ class TestRdpTofu:
                             port=rdp_port,
                             username="warpgate-rdp-test",
                             password="test",
+                            tls_mode="Preferred",
                         )
                     ),
                 )
@@ -92,6 +93,7 @@ class TestRdpKnownHostCrud:
                             port=3389,
                             username="testuser",
                             password="testpass",
+                            tls_mode="Preferred",
                         )
                     ),
                 )
@@ -164,6 +166,7 @@ class TestRdpKnownHostCrud:
                             port=3389,
                             username="testuser",
                             password="testpass",
+                            tls_mode="Preferred",
                         )
                     ),
                 )
