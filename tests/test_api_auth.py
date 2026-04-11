@@ -231,7 +231,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="add_rdp_known_host",
-        permission="config_edit",
+        permission="targets_edit",
         call=lambda api, r: api.add_rdp_known_host_with_http_info(
             r["target_id"],
             sdk.AddRdpKnownHostRequest(
@@ -244,13 +244,13 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="get_rdp_known_hosts",
-        permission="config_edit",
+        permission="targets_edit",
         call=lambda api, r: api.get_rdp_known_hosts_with_http_info(r["target_id"]),
         expected_statuses={200},
     ),
     AdminApiTestCase(
         id="get_rdp_known_host",
-        permission="config_edit",
+        permission="targets_edit",
         call=lambda api, r: api.get_rdp_known_host_with_http_info(
             r["target_id"], "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         ),
@@ -258,7 +258,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="delete_rdp_known_host",
-        permission="config_edit",
+        permission="targets_edit",
         call=lambda api, r: api.delete_rdp_known_host_with_http_info(
             r["target_id"], "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         ),

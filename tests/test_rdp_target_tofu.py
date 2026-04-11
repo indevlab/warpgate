@@ -191,8 +191,6 @@ class TestRdpKnownHostCrud:
             # Delete the target
             api.delete_target(target_id)
 
-            # Verify known hosts are gone — fetching for a deleted target
-            # should return 404 or an empty list
-            with pytest.raises(sdk.ApiException) as exc_info:
-                api.get_rdp_known_hosts(target_id)
-            assert exc_info.value.status == 404
+            # Verify known hosts are gone — the cascade deletes them
+            known_hosts = api.get_rdp_known_hosts(target_id)
+            assert len(known_hosts) == 0
