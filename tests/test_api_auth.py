@@ -240,7 +240,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
                 certificate_sha256="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             ),
         ),
-        expected_statuses={200},
+        expected_statuses={201},
     ),
     AdminApiTestCase(
         id="get_rdp_known_hosts",
