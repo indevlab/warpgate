@@ -321,8 +321,36 @@ async fn run_session(
     // After both handshakes complete, the client thinks it's talking to Warpgate's
     // RDP server, and the target thinks it's talking to Warpgate's RDP client.
     // We extract the underlying TLS streams and proxy raw bytes between them.
-    let (client_tls_stream, _client_leftover) = accepted.framed.into_inner();
-    let (target_tls_stream, _target_leftover) = connected.framed.into_inner();
+    //
+    // The framed wrappers may have buffered bytes that were read from the wire
+    // but not yet consumed by the state machine. These leftover bytes MUST be
+    // forwarded to the other side before the raw proxy loop starts, otherwise
+    // the first PDUs (e.g. graphics updates from the target) would be lost,
+    // causing a black screen on the client.
+    let (mut client_tls_stream, client_leftover) = accepted.framed.into_inner();
+    let (mut target_tls_stream, target_leftover) = connected.framed.into_inner();
+
+    // Forward any leftover bytes from the framed buffers
+    if !target_leftover.is_empty() {
+        debug!(
+            bytes = target_leftover.len(),
+            "Forwarding target leftover bytes to client"
+        );
+        client_tls_stream
+            .write_all(&target_leftover)
+            .await
+            .context("writing target leftover to client")?;
+    }
+    if !client_leftover.is_empty() {
+        debug!(
+            bytes = client_leftover.len(),
+            "Forwarding client leftover bytes to target"
+        );
+        target_tls_stream
+            .write_all(&client_leftover)
+            .await
+            .context("writing client leftover to target")?;
+    }
 
     // Read inactivity timeout from config
     let inactivity_timeout = {
