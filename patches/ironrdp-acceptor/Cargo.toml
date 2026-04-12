@@ -1,0 +1,18 @@
+[package]
+edition = "2021"
+name = "ironrdp-acceptor"
+version = "0.7.0"
+description = "State machines to drive an RDP connection acceptance sequence (patched for Warpgate)"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "ironrdp_acceptor"
+path = "src/lib.rs"
+
+[dependencies]
+ironrdp-async = "0.7"
+ironrdp-connector = "0.7"
+ironrdp-core = { version = "0.1", features = ["alloc"] }
+ironrdp-pdu = "0.6"
+ironrdp-svc = "0.5"
+tracing = { version = "0.1", features = ["log"] }
