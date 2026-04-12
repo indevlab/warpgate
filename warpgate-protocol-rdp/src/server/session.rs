@@ -119,6 +119,14 @@ async fn run_session(
         anyhow::bail!("RDP client disconnected before sending data");
     }
 
+    // Log the raw X.224 data for debugging cookie extraction issues
+    debug!(
+        bytes = n,
+        hex = %hex::encode(&peek_buf[..n.min(256)]),
+        lossy_text = %String::from_utf8_lossy(&peek_buf[..n.min(256)]),
+        "Raw X.224 Connection Request data"
+    );
+
     let raw_username = extract_cookie_username(&peek_buf[..n]).ok_or_else(|| {
         anyhow::anyhow!(
             "No mstshash cookie in X.224 Connection Request — \
