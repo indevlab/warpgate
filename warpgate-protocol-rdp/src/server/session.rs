@@ -103,42 +103,41 @@ async fn run_session(
     _remote_address: SocketAddr,
     server_handle: Arc<Mutex<warpgate_core::WarpgateServerHandle>>,
 ) -> Result<()> {
-    // Phase 1: Read the X.224 Connection Request to extract the routing cookie.
+    // Phase 1: Run the IronRDP acceptor (X.224 → TLS → MCS/Capabilities).
     //
-    // The RDP client sends "Cookie: mstshash=username#target\r\n" in the initial
-    // X.224 Connection Request PDU. We peek at this (without consuming bytes) to
-    // determine which Warpgate user and target the session is for. The acceptor
-    // will then read the same bytes properly during its state machine.
-    let mut peek_buf = [0u8; 4096];
-    let n = client_stream
-        .peek(&mut peek_buf)
+    // The acceptor intercepts the ClientInfo PDU to extract the client's
+    // credentials (username, password, domain). The username must be in
+    // 'user#target' format so we know which Warpgate user and target this
+    // session is for.
+    //
+    // We no longer rely on the mstshash cookie from the X.224 Connection
+    // Request — most modern RDP clients (Windows App, Microsoft Remote
+    // Desktop) don't send it.
+    let tls_cert_key = {
+        let config = services.config.lock().await;
+        crate::keys::load_certificate_and_key(&config, &services.global_params)
+            .await
+            .context("loading RDP TLS certificate")?
+    };
+
+    let server_tls_config =
+        build_rdp_server_tls_config(tls_cert_key).context("building RDP TLS config")?;
+
+    let accepted = accept_rdp(client_stream, server_tls_config)
         .await
-        .context("peeking at initial RDP data")?;
+        .context("RDP acceptor failed")?;
 
-    if n == 0 {
-        anyhow::bail!("RDP client disconnected before sending data");
-    }
+    info!("RDP acceptor: inbound connection accepted, TLS established");
 
-    // Log the raw X.224 data for debugging cookie extraction issues
-    debug!(
-        bytes = n,
-        hex = %hex::encode(&peek_buf[..n.min(256)]),
-        lossy_text = %String::from_utf8_lossy(&peek_buf[..n.min(256)]),
-        "Raw X.224 Connection Request data"
-    );
+    // Phase 2: Extract user#target from the ClientInfo credentials.
+    let raw_username = &accepted.credentials.username;
+    let client_password = accepted.credentials.password.clone();
 
-    let raw_username = extract_cookie_username(&peek_buf[..n]).ok_or_else(|| {
-        anyhow::anyhow!(
-            "No mstshash cookie in X.224 Connection Request — \
-             RDP clients must set the username field to 'user#target'"
-        )
-    })?;
+    let (warpgate_username, target_name) = parse_username_target(raw_username)?;
 
-    let (warpgate_username, target_name) = parse_username_target(&raw_username)?;
+    info!(%warpgate_username, %target_name, "RDP auth: parsed user#target from ClientInfo");
 
-    info!(%warpgate_username, %target_name, "RDP auth: parsed user#target from cookie");
-
-    // Authenticate and authorize via ConfigProvider
+    // Phase 3: Authenticate and authorize via ConfigProvider
     let mut cp = services.config_provider.lock().await;
 
     // Look up user to get AuthStateUserInfo
@@ -176,7 +175,7 @@ async fn run_session(
     // Create an auth state for the audit trail.
     let credential_kinds = get_rdp_credential_requirements(&mut cp, &warpgate_username).await?;
     let sid = server_handle.lock().await.id();
-    let (_auth_state_id, _auth_state) = services
+    let (_auth_state_id, auth_state) = services
         .auth_state_store
         .lock()
         .await
@@ -187,6 +186,37 @@ async fn run_session(
             &credential_kinds,
         )
         .await?;
+
+    // Validate the password from ClientInfo against Warpgate's user store
+    let password_secret = Secret::new(client_password);
+    let auth_result = validate_rdp_credentials(
+        &services,
+        &warpgate_username,
+        &password_secret,
+        &auth_state,
+    )
+    .await?;
+
+    match auth_result {
+        AuthResult::Accepted { .. } => {
+            info!(%warpgate_username, "RDP authentication successful");
+        }
+        AuthResult::Need(remaining) => {
+            warn!(%warpgate_username, ?remaining, "RDP authentication incomplete — additional credentials required");
+            anyhow::bail!(
+                "Authentication incomplete for user '{}' — additional credentials required: {:?}",
+                warpgate_username,
+                remaining
+            );
+        }
+        AuthResult::Rejected => {
+            warn!(%warpgate_username, "RDP authentication rejected");
+            anyhow::bail!(
+                "Authentication rejected for user '{}'",
+                warpgate_username
+            );
+        }
+    }
 
     drop(cp);
 
@@ -204,28 +234,7 @@ async fn run_session(
         "Connecting to RDP target"
     );
 
-    // Phase 2: Run the IronRDP acceptor on the inbound stream.
-    //
-    // This performs X.224 negotiation, TLS upgrade, CredSSP (deferred validation),
-    // and MCS/capability exchange. The result is a fully-negotiated framed stream
-    // wrapped in TLS.
-    let tls_cert_key = {
-        let config = services.config.lock().await;
-        crate::keys::load_certificate_and_key(&config, &services.global_params)
-            .await
-            .context("loading RDP TLS certificate")?
-    };
-
-    let server_tls_config =
-        build_rdp_server_tls_config(tls_cert_key).context("building RDP TLS config")?;
-
-    let accepted = accept_rdp(client_stream, server_tls_config)
-        .await
-        .context("RDP acceptor failed")?;
-
-    info!("RDP acceptor: inbound connection accepted, TLS established");
-
-    // Phase 3: Connect to the target using IronRDP connector with TOFU verification.
+    // Phase 4: Connect to the target using IronRDP connector with TOFU verification.
     let desktop_size = DesktopSize {
         width: 1920,
         height: 1080,
@@ -263,7 +272,7 @@ async fn run_session(
 
     info!("RDP connector: outbound connection established with TOFU verification");
 
-    // Phase 4: Start recording
+    // Phase 5: Start recording
     let session_id = server_handle.lock().await.id();
     let recorder = {
         let recordings = services.recordings.lock().await;
@@ -307,7 +316,7 @@ async fn run_session(
         }
     }
 
-    // Phase 5: Extract TLS streams from both framed wrappers and start the proxy.
+    // Phase 6: Extract TLS streams from both framed wrappers and start the proxy.
     //
     // After both handshakes complete, the client thinks it's talking to Warpgate's
     // RDP server, and the target thinks it's talking to Warpgate's RDP client.
@@ -363,8 +372,8 @@ async fn get_rdp_credential_requirements(
 
 /// Validate RDP credentials against the Warpgate user store.
 ///
-/// This function is used by the full IronRDP acceptor flow to validate a
-/// password extracted from the CredSSP exchange.
+/// This function validates the password extracted from the ClientInfo PDU
+/// against the Warpgate user store via `ConfigProvider`.
 ///
 /// If the password is valid, it is added to the auth state. If MFA (TOTP)
 /// is additionally required, a warning is logged since TOTP cannot be
@@ -476,23 +485,6 @@ where
     Ok(())
 }
 
-/// Extract the username from the X.224 Connection Request's mstshash cookie.
-///
-/// The cookie format is: `Cookie: mstshash=<value>\r\n`
-/// embedded in the X.224 TPDU header. We scan for this pattern in the raw bytes.
-fn extract_cookie_username(data: &[u8]) -> Option<String> {
-    let haystack = String::from_utf8_lossy(data);
-    let prefix = "Cookie: mstshash=";
-    let start = haystack.find(prefix)?;
-    let after_prefix = &haystack[start + prefix.len()..];
-    let end = after_prefix.find("\r\n").unwrap_or(after_prefix.len());
-    let value = after_prefix[..end].trim();
-    if value.is_empty() {
-        return None;
-    }
-    Some(value.to_string())
-}
-
 /// Parse "username#target" into (username, target_name).
 fn parse_username_target(raw: &str) -> Result<(String, String)> {
     let parts: Vec<&str> = raw.splitn(2, '#').collect();
@@ -540,17 +532,5 @@ mod tests {
     fn test_parse_username_target_empty_parts() {
         assert!(parse_username_target("#target").is_err());
         assert!(parse_username_target("user#").is_err());
-    }
-
-    #[test]
-    fn test_extract_cookie_username() {
-        let data = b"\x03\x00\x00*%\xe0\x00\x00\x00\x00\x00Cookie: mstshash=alice#srv\r\n\x01\x00\x08\x00\x03\x00\x00\x00";
-        assert_eq!(extract_cookie_username(data), Some("alice#srv".to_string()));
-    }
-
-    #[test]
-    fn test_extract_cookie_username_missing() {
-        let data = b"\x03\x00\x00\x0b\x06\xe0\x00\x00\x00\x00\x00";
-        assert_eq!(extract_cookie_username(data), None);
     }
 }

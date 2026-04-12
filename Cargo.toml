@@ -91,6 +91,9 @@ tokio-tungstenite = { version = "0.27", features = ["rustls-tls-native-roots", "
 reqwest-websocket = "0.6.0"
 time = "0.3"
 
+[patch.crates-io]
+ironrdp-acceptor = { path = "patches/ironrdp-acceptor" }
+
 [profile.release]
 lto = true
 panic = "abort"
