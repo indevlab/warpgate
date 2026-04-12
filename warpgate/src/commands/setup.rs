@@ -13,7 +13,7 @@ use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
     GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, PostgresConfig,
-    Secret, SshConfig, WarpgateConfigStore,
+    RdpConfig, Secret, SshConfig, WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
 
@@ -250,6 +250,30 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
         }
     }
 
+    if let Commands::UnattendedSetup { rdp_port, .. } = &cli.command {
+        if let Some(rdp_port) = rdp_port {
+            store.rdp.enable = true;
+            store.rdp.listen =
+                ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *rdp_port));
+        }
+    } else {
+        if is_docker() {
+            store.rdp.enable = true;
+        } else {
+            store.rdp.enable = dialoguer::Confirm::with_theme(&theme)
+                .default(true)
+                .with_prompt("Accept RDP connections?")
+                .interact()?;
+
+            if store.rdp.enable {
+                store.rdp.listen = prompt_endpoint(
+                    "Endpoint to listen for RDP connections on",
+                    &RdpConfig::default().listen,
+                );
+            }
+        }
+    }
+
     store.http.certificate = data_path
         .join("tls.certificate.pem")
         .to_string_lossy()
@@ -265,6 +289,15 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
 
     store.kubernetes.certificate = store.http.certificate.clone();
     store.kubernetes.key = store.http.key.clone();
+
+    store.rdp.certificate = data_path
+        .join("rdp-certificate.pem")
+        .to_string_lossy()
+        .to_string();
+    store.rdp.key = data_path
+        .join("rdp-key.pem")
+        .to_string_lossy()
+        .to_string();
 
     // ---
 
@@ -358,6 +391,8 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
             secure_file(&key_path)?;
         }
     }
+
+    warpgate_protocol_rdp::generate_certificate_if_needed(&config, params)?;
 
     info!("");
     info!("Admin user credentials:");

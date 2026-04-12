@@ -1,6 +1,7 @@
 mod client;
 mod common;
 pub mod keys;
+pub use keys::generate_certificate_if_needed;
 mod known_hosts;
 mod recorder_tap;
 mod server;

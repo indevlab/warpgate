@@ -99,6 +99,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     }
 
     if config.store.rdp.enable {
+        warpgate_protocol_rdp::generate_certificate_if_needed(&config, &services.global_params)?;
         protocol_futures.push(
             run_protocol_server(
                 RDPProtocolServer::new(&services),
