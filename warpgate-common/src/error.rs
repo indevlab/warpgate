@@ -3,6 +3,7 @@ use std::error::Error;
 use poem::error::ResponseError;
 use poem_openapi::ApiResponse;
 use uuid::Uuid;
+use warpgate_aws::AwsError;
 use warpgate_ca::CaError;
 use warpgate_sso::SsoError;
 use warpgate_tls::RustlsSetupError;
@@ -15,12 +16,16 @@ pub enum WarpgateError {
     DatabaseError(#[from] sea_orm::DbErr),
     #[error("ticket not found: {0}")]
     InvalidTicket(Uuid),
+    #[error("invalid target")]
+    InvalidTarget,
     #[error("invalid credential type")]
     InvalidCredentialType,
     #[error(transparent)]
     Other(Box<dyn Error + Send + Sync>),
     #[error("user {0} not found")]
     UserNotFound(String),
+    #[error("user {0} already exists")]
+    UserAlreadyExists(String),
     #[error("role {0} not found")]
     RoleNotFound(String),
     #[error("failed to parse URL: {0}")]
@@ -63,17 +68,38 @@ pub enum WarpgateError {
     NoAdminAccess,
     #[error("admin permission required: {0:?}")]
     NoAdminPermission(AdminPermission),
+    #[error("AWS: {0}")]
+    Aws(AwsError),
+    #[error("IP address {0} is not in the allowed range for user {1}")]
+    IpAddrNotAllowed(String, String),
+    #[error("could not parse IP network address: {0}")]
+    InvalidNetworkAddress(String),
+    #[error("session limit reached")]
+    SessionLimitReached,
+    #[error("the node ID {0} is gone from the cluster")]
+    NodeGone(Uuid),
+    #[error(transparent)]
+    Encryption(#[from] crate::encryption::EncryptionError),
 }
 
 impl ResponseError for WarpgateError {
     fn status(&self) -> poem::http::StatusCode {
         match self {
-            Self::InvalidTicket(_) | Self::UserNotFound(_) | Self::RoleNotFound(_) => {
-                poem::http::StatusCode::UNAUTHORIZED
-            }
+            Self::InvalidTicket(_)
+            | Self::UserNotFound(_)
+            | Self::RoleNotFound(_)
+            | Self::IpAddrNotAllowed(..) => poem::http::StatusCode::UNAUTHORIZED,
+            Self::UserAlreadyExists(_) => poem::http::StatusCode::CONFLICT,
             Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
+            Self::SessionLimitReached => poem::http::StatusCode::TOO_MANY_REQUESTS,
             _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
         }
+    }
+}
+
+impl From<Box<dyn Error + Send + Sync + 'static>> for WarpgateError {
+    fn from(err: Box<dyn Error + Send + Sync + 'static>) -> Self {
+        Self::Other(err)
     }
 }
 

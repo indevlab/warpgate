@@ -1,5 +1,6 @@
 mod commands;
 mod config;
+mod listener_supervisor;
 mod logging;
 
 use std::path::PathBuf;
@@ -79,9 +80,21 @@ pub(crate) enum Commands {
         #[clap(long)]
         kubernetes_port: Option<u16>,
 
+        /// Enable VNC and set port
+        #[clap(long)]
+        vnc_port: Option<u16>,
+
+        /// Enable RDP and set port
+        #[clap(long)]
+        rdp_port: Option<u16>,
+
         /// Enable session recording
         #[clap(long)]
         record_sessions: bool,
+
+        /// How to handle unknown SSH host keys of the targets
+        #[clap(long, value_enum, default_value_t)]
+        host_key_verification: warpgate_common::SshHostKeyVerificationMode,
 
         /// Password for the initial user (required if WARPGATE_ADMIN_PASSWORD env var is not set)
         #[clap(long)]
@@ -116,6 +129,21 @@ pub(crate) enum Commands {
         #[clap(action=ArgAction::Set)]
         username: Option<String>,
     },
+    /// Copy the current database contents into another database
+    CopyDatabase {
+        /// Target database URL
+        #[clap(action=ArgAction::Set)]
+        target_url: String,
+    },
+    /// Run database migrations
+    #[clap(allow_negative_numbers = true)]
+    MigrateDatabase {
+        /// Number of migrations to apply (positive) or revert (negative)
+        #[clap(value_name = "STEPS", default_value = "1", allow_hyphen_values = true)]
+        steps: i32,
+        #[clap(long, action=ArgAction::SetTrue)]
+        destructive: bool,
+    },
     /// Show version information
     Version,
     /// Automatic healthcheck for running Warpgate in a container
@@ -125,6 +153,11 @@ pub(crate) enum Commands {
 async fn _main() -> Result<()> {
     let cli = Cli::parse();
     let params = cli.into_global_params()?;
+
+    // Development convenience only, and having no `.env` at all is the normal case -
+    // so a failure to find one must not stop the process.
+    #[cfg(debug_assertions)]
+    let _ = dotenv::dotenv();
 
     init_logging(load_config(&params, false).ok().as_ref(), &cli).await?;
 
@@ -171,11 +204,23 @@ async fn _main() -> Result<()> {
         Commands::Setup { .. } | Commands::UnattendedSetup { .. } => {
             crate::commands::setup::command(&cli, &params).await
         }
-        Commands::ClientKeys => crate::commands::client_keys::command(&params),
+        Commands::ClientKeys => crate::commands::client_keys::command(&params).await,
         Commands::RecoverAccess { username } => {
             crate::commands::recover_access::command(&params, username.as_ref()).await
         }
         Commands::Healthcheck => crate::commands::healthcheck::command(&params).await,
+        Commands::MigrateDatabase { steps, destructive } => {
+            if *steps < 0 && !destructive {
+                error!(
+                    "Reverting migrations is a destructive operation. Use the --destructive flag to confirm."
+                );
+                std::process::exit(1);
+            }
+            crate::commands::migrate::command(&params, *steps).await
+        }
+        Commands::CopyDatabase { target_url } => {
+            crate::commands::copy_database::command(&params, target_url).await
+        }
     }
 }
 

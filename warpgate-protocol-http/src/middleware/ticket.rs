@@ -1,10 +1,13 @@
+use std::net::IpAddr;
+
 use poem::session::Session;
 use poem::web::{Data, FromRequest};
 use poem::{Endpoint, Middleware, Request};
 use serde::Deserialize;
 use warpgate_common::Secret;
-use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::SessionAuthorization;
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::{authorize_ticket, consume_ticket};
 
 use crate::common::SessionExt;
@@ -52,32 +55,42 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
 
             for h in req.headers().get_all(http::header::AUTHORIZATION) {
                 let header_value = h.to_str().unwrap_or("").to_string();
-                if let Some((token_type, token_value)) = header_value.split_once(' ') {
-                    if &token_type.to_lowercase() == "warpgate" {
-                        ticket_value = Some(token_value.to_string());
-                        session_is_temporary = true;
-                    }
+                if let Some((token_type, token_value)) = header_value.split_once(' ')
+                    && &token_type.to_lowercase() == "warpgate"
+                {
+                    ticket_value = Some(token_value.to_string());
+                    session_is_temporary = true;
                 }
             }
 
-            if let Some(ticket) = ticket_value {
-                if let Some((_ticket_model, target, user_info)) = {
+            if let Some(ticket) = ticket_value
+                && let Some(authorization) = {
                     let ticket_secret = Secret::new(ticket);
-                    if let Some((ticket, target, user_info)) =
-                        authorize_ticket(&ctx.services.db, &ticket_secret).await?
+                    let client_ip: Option<IpAddr> = get_client_ip(&req, ctx.services())
+                        .await
+                        .and_then(|s| s.parse().ok());
+                    if let Some((ticket, authorization)) = authorize_ticket(
+                        &ctx.services().db,
+                        &ctx.services().login_protection,
+                        &ticket_secret,
+                        client_ip,
+                        crate::common::PROTOCOL_NAME,
+                    )
+                    .await?
                     {
-                        consume_ticket(&ctx.services.db, &ticket.id).await?;
-                        Some((ticket, target, user_info))
+                        consume_ticket(&ctx.services().db, &ticket.id).await?;
+                        Some(authorization)
                     } else {
                         None
                     }
-                } {
-                    session.set_auth(SessionAuthorization::Ticket {
-                        user_id: user_info.id,
-                        username: user_info.username,
-                        target_name: target.name,
-                    });
                 }
+            {
+                let (user_info, target) = authorization.into_parts();
+                session.set_auth(SessionAuthorization::Ticket {
+                    user_id: user_info.id,
+                    username: user_info.username,
+                    target_id: target.id,
+                });
             }
         }
 

@@ -1,6 +1,10 @@
+use std::str::FromStr;
+
+use ipnet::IpNet;
 use poem_openapi::Object;
-use sea_orm::entity::prelude::*;
 use sea_orm::Set;
+use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::{Func, IntoCondition};
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{User, UserDetails, WarpgateError};
@@ -16,6 +20,7 @@ use crate::{
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(unique)]
     pub username: String,
     pub credential_policy: serde_json::Value,
     #[sea_orm(column_type = "Text")]
@@ -24,6 +29,8 @@ pub struct Model {
     pub ldap_server_id: Option<Uuid>,
     #[sea_orm(column_type = "Text", nullable)]
     pub ldap_object_uuid: Option<Uuid>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub allowed_ip_ranges: serde_json::Value,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -131,10 +138,30 @@ impl RelationTrait for Relation {
 
 impl ActiveModelBehavior for ActiveModel {}
 
+impl Entity {
+    pub fn username_eq_ci(username: &str) -> impl IntoCondition {
+        Expr::expr(Func::lower(Expr::col(Column::Username))).eq(username.to_lowercase())
+    }
+}
+
 impl TryFrom<Model> for User {
     type Error = WarpgateError;
 
     fn try_from(model: Model) -> Result<Self, WarpgateError> {
+        let allowed_ip_ranges = if model.allowed_ip_ranges.is_null() {
+            None
+        } else {
+            let ranges: Vec<String> = serde_json::from_value(model.allowed_ip_ranges)?;
+            Some(
+                ranges
+                    .into_iter()
+                    .map(|x| {
+                        IpNet::from_str(&x).map_err(|_| WarpgateError::InvalidNetworkAddress(x))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+        };
+
         Ok(Self {
             id: model.id,
             username: model.username,
@@ -142,6 +169,8 @@ impl TryFrom<Model> for User {
             description: model.description,
             rate_limit_bytes_per_second: model.rate_limit_bytes_per_second,
             ldap_server_id: model.ldap_server_id,
+            allowed_ip_ranges: allowed_ip_ranges
+                .map(|ranges| ranges.into_iter().map(Into::into).collect()),
         })
     }
 }
@@ -214,6 +243,15 @@ impl TryFrom<User> for ActiveModel {
             rate_limit_bytes_per_second: Set(user.rate_limit_bytes_per_second),
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
+            allowed_ip_ranges: Set(match user.allowed_ip_ranges {
+                Some(ranges) => serde_json::to_value(
+                    ranges
+                        .into_iter()
+                        .map(|x| x.to_string())
+                        .collect::<Vec<_>>(),
+                )?,
+                None => serde_json::Value::Null,
+            }),
         })
     }
 }

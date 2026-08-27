@@ -1,34 +1,54 @@
 <script lang="ts">
-    import { api, ApiAuthState, type AuthStateResponseInternal } from 'gateway/lib/api'
+    import {
+        Alert,
+        ButtonGroup,
+        Dropdown,
+        DropdownItem,
+        DropdownMenu,
+        DropdownToggle,
+    } from '@sveltestrap/sveltestrap'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import RelativeDate from 'admin/RelativeDate.svelte'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { formatDurationAsHumantime } from 'common/duration'
     import Loadable from 'common/Loadable.svelte'
+    import RelativeDate from 'common/RelativeDate.svelte'
+    import {
+        ApiAuthState,
+        type AuthStateResponseInternal,
+        api,
+        WebApprovalScope,
+    } from 'gateway/lib/api'
 
     interface Props {
-        params: { stateId: string };
+        params: { stateId: string }
     }
 
     let { params }: Props = $props()
 
     let authState: AuthStateResponseInternal | undefined = $state()
 
-    async function reload () {
+    let cachingGrace = $derived(authState?.webApprovalCachingGraceSeconds ?? 0)
+    let cachingEnabled = $derived(cachingGrace > 0)
+    let graceLabel = $derived(formatDurationAsHumantime(cachingGrace))
+
+    async function reload() {
         authState = await api.getAuthState({ id: params.stateId })
     }
 
-    async function init () {
+    async function init() {
         await reload()
     }
 
-    async function approve () {
-        api.approveAuth({ id: params.stateId })
+    async function approve(scope: WebApprovalScope) {
+        await api.approveAuth({
+            id: params.stateId,
+            approveAuthRequest: { scope },
+        })
         await reload()
         window.close()
     }
 
-    async function reject () {
-        api.rejectAuth({ id: params.stateId })
+    async function reject() {
+        await api.rejectAuth({ id: params.stateId })
         await reload()
         window.close()
     }
@@ -48,58 +68,86 @@
 </style>
 
 <Loadable promise={init()}>
-{#if authState}
-    <div class="page-summary-bar">
-        <h1>authorization request</h1>
-    </div>
-
-    <div class="mb-5">
-        <div class="mb-2">Ensure this security key matches your authentication prompt:</div>
-        <div class="identification-string">
-            <!-- eslint-disable-next-line svelte/require-each-key -->
-            {#each authState?.identificationString as char}
-                <div class="card bg-secondary text-light">
-                    <div class="card-body">{char}</div>
-                </div>
-            {/each}
+    {#if authState}
+        <div class="page-summary-bar">
+            <h1>authorization request</h1>
         </div>
-    </div>
 
-    <div class="mb-3">
-        <div>
-            Authorize this {authState.protocol} session?
+        <div class="mb-5">
+            <div class="mb-2">
+                Ensure this security key matches your authentication prompt:
+            </div>
+            <div class="identification-string">
+                {#each authState?.identificationString as char}
+                    <div class="card bg-secondary text-light">
+                        <div class="card-body">{char}</div>
+                    </div>
+                {/each}
+            </div>
         </div>
-        <small>
-            Requested <RelativeDate date={authState.started} />
-            {#if authState.address}from {authState.address}{/if}
-        </small>
-    </div>
 
-    {#if authState.state === ApiAuthState.Success}
-        <Alert color="success">
-            Approved
-        </Alert>
-    {:else if authState.state === ApiAuthState.Failed}
-        <Alert color="danger">
-            Rejected
-        </Alert>
-    {:else}
-        <div class="d-flex">
-            <AsyncButton
-                color="primary"
-                class="d-flex align-items-center ms-auto"
-                click={approve}
-            >
-                Authorize
-            </AsyncButton>
-            <AsyncButton
-                color="secondary"
-                class="d-flex align-items-center ms-2"
-                click={reject}
-            >
-                Reject
-            </AsyncButton>
+        <div class="mb-3">
+            <div>Authorize this {authState.protocol} session?</div>
+            <small>
+                Requested <RelativeDate date={authState.started} />
+                {#if authState.address}
+                    from {authState.address}
+                {/if}
+            </small>
         </div>
+
+        {#if authState.state === ApiAuthState.Success}
+            <Alert color="success"> Approved </Alert>
+        {:else if authState.state === ApiAuthState.Failed}
+            <Alert color="danger"> Rejected </Alert>
+        {:else}
+            <div class="d-flex">
+                <div class="ms-auto"></div>
+                {#if cachingEnabled}
+                    <ButtonGroup>
+                        <AsyncButton
+                            color="primary"
+                            click={() => approve(WebApprovalScope.Target)}
+                        >
+                            Authorize & remember for {graceLabel}
+                        </AsyncButton>
+                        <Dropdown class="btn-group">
+                            <DropdownToggle
+                                color="primary"
+                                caret
+                                class="ps-2"
+                            />
+                            <DropdownMenu end>
+                                <DropdownItem
+                                    onclick={() => approve(WebApprovalScope.AllTargets)}
+                                >
+                                    Authorize for all targets & remember for
+                                    {graceLabel}
+                                </DropdownItem>
+                                <DropdownItem
+                                    onclick={() => approve(WebApprovalScope.Once)}
+                                >
+                                    Authorize this time only
+                                </DropdownItem>
+                            </DropdownMenu>
+                        </Dropdown>
+                    </ButtonGroup>
+                {:else}
+                    <AsyncButton
+                        color="primary"
+                        click={() => approve(WebApprovalScope.Once)}
+                    >
+                        Authorize
+                    </AsyncButton>
+                {/if}
+                <AsyncButton
+                    color="secondary"
+                    class="d-flex align-items-center ms-2"
+                    click={reject}
+                >
+                    Reject
+                </AsyncButton>
+            </div>
+        {/if}
     {/if}
-{/if}
 </Loadable>

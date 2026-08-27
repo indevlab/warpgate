@@ -1,11 +1,17 @@
 <script lang="ts">
-    import { api, type TargetOptions, type TargetGroup, TlsMode } from 'admin/lib/api'
-    import { replace } from 'svelte-spa-router'
-    import { Button, Form, FormGroup } from '@sveltestrap/sveltestrap'
+    import { Alert, Button, Form, FormGroup } from '@sveltestrap/sveltestrap'
+    import {
+        api,
+        RdpTargetCompression,
+        RdpTlsSecurity,
+        type TargetGroup,
+        type TargetOptions,
+        TlsMode,
+    } from 'admin/lib/api'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import { onMount } from 'svelte'
     import { TargetKind } from 'gateway/lib/api'
+    import { onMount } from 'svelte'
+    import { replace } from 'svelte-spa-router'
     import { adminPermissions } from '../../lib/store'
 
     interface Props {
@@ -14,14 +20,14 @@
 
     let { params }: Props = $props()
 
-    let error: string|null = $state(null)
+    let error: string | null = $state(null)
     let name = $state('')
     let groups: TargetGroup[] = $state([])
     let selectedGroupId: string | undefined = $state()
 
-    async function create () {
+    async function create() {
         try {
-            const options: TargetOptions|undefined = {
+            const options: TargetOptions | undefined = {
                 Ssh: {
                     kind: TargetKind.Ssh,
                     host: '192.168.0.1',
@@ -48,7 +54,10 @@
                         verify: true,
                     },
                     username: 'root',
-                    password: '',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
                 },
                 Postgres: {
                     kind: TargetKind.Postgres,
@@ -59,7 +68,10 @@
                         verify: true,
                     },
                     username: 'postgres',
-                    password: '',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
                 },
                 Kubernetes: {
                     kind: TargetKind.Kubernetes,
@@ -73,6 +85,27 @@
                         certificate: '',
                         privateKey: '',
                     },
+                },
+                Vnc: {
+                    kind: TargetKind.Vnc,
+                    host: '192.168.0.1',
+                    port: 5900,
+                    auth: {
+                        kind: 'None' as const,
+                    },
+                },
+                Rdp: {
+                    kind: TargetKind.Rdp,
+                    host: '192.168.0.1',
+                    port: 3389,
+                    username: 'Administrator',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
+                    verifyTls: false,
+                    tlsSecurity: RdpTlsSecurity.Tls12,
+                    compression: RdpTargetCompression.Remotefx,
                 },
             }[params.kind]
             if (!options) {
@@ -102,10 +135,12 @@
 
 <div class="container-max-md">
     {#if !$adminPermissions.targetsCreate}
-        <Alert color="warning">You do not have permission to create targets.</Alert>
+        <Alert color="warning"
+            >You do not have permission to create targets.</Alert
+        >
     {/if}
     {#if error}
-    <Alert color="danger">{error}</Alert>
+        <Alert color="danger">{error}</Alert>
     {/if}
 
     <div class="page-summary-bar">
@@ -113,33 +148,37 @@
     </div>
 
     <div class="narrow-page">
-        <Form on:submit={e => {
+        <Form
+            on:submit={e => {
             create()
             e.preventDefault()
-        }}>
+        }}
+        >
             <!-- Defualt button for key handling -->
             <Button class="d-none" type="submit"></Button>
 
             <FormGroup floating label="Name">
                 <!-- svelte-ignore a11y_autofocus -->
-                <input class="form-control" autofocus required bind:value={name} />
+                <input
+                    class="form-control"
+                    autofocus
+                    required
+                    bind:value={name}
+                >
             </FormGroup>
 
             {#if groups.length > 0}
-            <FormGroup floating label="Group">
-                <select class="form-control" bind:value={selectedGroupId}>
-                    <option value={undefined}>No group</option>
-                    {#each groups as group (group.id)}
-                        <option value={group.id}>{group.name}</option>
-                    {/each}
-                </select>
-            </FormGroup>
+                <FormGroup floating label="Group">
+                    <select class="form-control" bind:value={selectedGroupId}>
+                        <option value={undefined}>No group</option>
+                        {#each groups as group (group.id)}
+                            <option value={group.id}>{group.name}</option>
+                        {/each}
+                    </select>
+                </FormGroup>
             {/if}
 
-            <Button
-                color="primary"
-                type="submit"
-            >Create target</Button>
+            <Button color="primary" type="submit">Create target</Button>
         </Form>
     </div>
 </div>

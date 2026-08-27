@@ -1,14 +1,18 @@
+mod channel_registry;
 mod channel_writer;
 mod russh_handler;
 mod service_output;
 mod session;
 mod session_handle;
+mod target_menu;
 use std::borrow::Cow;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use futures::TryStreamExt;
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use russh::keys::{Algorithm, HashAlg, PrivateKey};
 use russh::{MethodKind, MethodSet, Preferred};
 pub use russh_handler::ServerHandler;
@@ -18,6 +22,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
 use warpgate_common::ListenEndpoint;
+use warpgate_common::helpers::net::accept_loop;
 use warpgate_core::{Services, SessionStateInit, State};
 use warpgate_db_entities::Parameters;
 
@@ -29,7 +34,11 @@ struct RusshConfigInit {
     keys: Vec<PrivateKey>,
 }
 
-pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<()> {
+pub async fn bind_server(
+    services: Services,
+    address: ListenEndpoint,
+    proxy_protocol: bool,
+) -> Result<BoxFuture<'static, Result<()>>> {
     let russh_config_init = Arc::new({
         let config = services.config.lock().await;
         RusshConfigInit {
@@ -37,37 +46,38 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
         }
     });
 
-    let mut listener = address.tcp_accept_stream().await?;
+    let listener = address.tcp_accept_stream().await?;
 
-    while let Some(stream) = listener.try_next().await.context("accepting connection")? {
-        let russh_config_init = russh_config_init.clone();
-        let services = services.clone();
-
-        tokio::task::Builder::new()
-            .name("SSH new connection setup")
-            .spawn(async move {
-                if let Err(e) = _handle_connection(services, russh_config_init, stream).await {
-                    error!(%e, "Connection handling failed");
+    Ok(async move {
+        accept_loop(
+            "SSH connection",
+            listener,
+            proxy_protocol,
+            move |stream, remote_address| {
+                let russh_config_init = russh_config_init.clone();
+                let services = services.clone();
+                async move {
+                    _handle_connection(services, russh_config_init, stream, remote_address).await
                 }
-            })?;
+            },
+        )
+        .await;
+        Ok(())
     }
-    Ok(())
+    .boxed())
 }
 
 async fn _handle_connection(
     services: Services,
     russh_config_init: Arc<RusshConfigInit>,
     stream: TcpStream,
+    remote_address: SocketAddr,
 ) -> Result<()> {
-    stream.set_nodelay(true)?;
-
-    let remote_address = stream.peer_addr().context("getting peer address")?;
-
     let (session_handle, session_handle_rx) = SSHSessionHandle::new();
 
     let server_handle = State::register_session(
         &services.state,
-        &crate::PROTOCOL_NAME,
+        crate::PROTOCOL_NAME,
         SessionStateInit {
             remote_address: Some(remote_address),
             handle: Box::new(session_handle),
@@ -80,8 +90,20 @@ async fn _handle_connection(
 
     let (event_tx, event_rx) = unbounded_channel();
 
-    let handler = ServerHandler { event_tx };
-    let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
+    let banner = {
+        let db = &services.db;
+        // Normalize line endings for terminal display.
+        Parameters::Entity::get(db)
+            .await?
+            .banner_text()
+            .map(|text| format!("{}\r\n", text.replace("\r\n", "\n").replace('\n', "\r\n")))
+    };
+
+    let handler = ServerHandler { event_tx, banner };
+    let wrapped_stream = {
+        let guard = server_handle.lock().await;
+        guard.wrap_stream(stream).await?
+    };
 
     let session = match ServerSession::start(
         remote_address,
@@ -105,7 +127,8 @@ async fn _handle_connection(
         russh::server::Config {
             auth_rejection_time: Duration::from_secs(1),
             auth_rejection_time_initial: Some(Duration::from_secs(0)),
-            inactivity_timeout: Some(config.store.ssh.inactivity_timeout),
+            // Extra time for the "closing due to inactivity" message to be sent
+            inactivity_timeout: Some(config.store.ssh.inactivity_timeout + Duration::from_secs(10)),
             keepalive_interval: config.store.ssh.keepalive_interval,
             methods: get_allowed_auth_methods(&services).await?,
             keys: russh_config_init.keys.clone(),
@@ -165,8 +188,8 @@ where
 
 pub async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> {
     let parameters = {
-        let db = services.db.lock().await;
-        Parameters::Entity::get(&db).await?
+        let db = &services.db;
+        Parameters::Entity::get(db).await?
     };
 
     let mut methods_vec: Vec<MethodKind> = Vec::new();
@@ -181,7 +204,14 @@ pub async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> 
     }
 
     if methods_vec.is_empty() {
-        warn!("All SSH authentication methods are disabled in parameters. Enabling all methods as fallback.");
+        warn!(
+            "All SSH authentication methods are disabled in parameters. Enabling all methods as fallback."
+        );
+        methods_vec = vec![
+            MethodKind::PublicKey,
+            MethodKind::Password,
+            MethodKind::KeyboardInteractive,
+        ];
     }
 
     Ok(MethodSet::from(&methods_vec[..]))

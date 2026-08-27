@@ -1,47 +1,85 @@
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use sea_orm::DatabaseConnection;
+use sea_orm::sea_query::Expr;
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
-use warpgate_common::{GlobalParams, WarpgateConfig};
+use tracing::warn;
+use warpgate_common::auth::{AuthState, CredentialKind};
+use warpgate_common::{GlobalParams, Protocol, Secret, SessionId, WarpgateConfig, WarpgateError};
+use warpgate_db_entities::Parameters;
 
-use crate::db::{connect_to_db, populate_db};
+use crate::cluster::Cluster;
+use crate::db::connect_to_db_and_migrate;
+use crate::login_protection::LoginProtectionService;
 use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
-use crate::{AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, State};
+use crate::{
+    AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, ListenerStatusRegistry, State,
+};
 
 #[derive(Clone)]
 pub struct Services {
-    pub db: Arc<Mutex<DatabaseConnection>>,
-    pub recordings: Arc<Mutex<SessionRecordings>>,
+    pub db: DatabaseConnection,
+    pub recordings: Arc<SessionRecordings>,
     pub config: Arc<Mutex<WarpgateConfig>>,
+    pub cluster: Arc<Cluster>,
     pub state: Arc<Mutex<State>>,
-    pub config_provider: Arc<Mutex<ConfigProviderEnum>>,
+    pub config_provider: Arc<ConfigProviderEnum>,
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
-    pub admin_token: Arc<Mutex<Option<String>>>,
+    pub admin_token: Arc<Option<Secret<String>>>,
+    pub cluster_token: Arc<Secret<String>>,
     pub rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
+    pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
+    pub listener_status: ListenerStatusRegistry,
+}
+
+/// Upsert the token without conflicts from multiple nodes
+/// starting at the same time
+async fn resolve_cluster_token(db: &DatabaseConnection) -> Result<Secret<String>> {
+    // Ensures the row exists before the conditional update.
+    let params = Parameters::Entity::get(db).await?;
+    if let Some(token) = params.cluster_token {
+        return Ok(Secret::new(token));
+    }
+
+    Parameters::Entity::update_many()
+        .col_expr(
+            Parameters::Column::ClusterToken,
+            Expr::value(Secret::<String>::random().expose_secret().clone()),
+        )
+        .filter(Parameters::Column::ClusterToken.is_null())
+        .exec(db)
+        .await?;
+
+    Parameters::Entity::get(db)
+        .await?
+        .cluster_token
+        .map(Secret::new)
+        .ok_or_else(|| anyhow::anyhow!("cluster token missing after generation"))
 }
 
 impl Services {
     pub async fn new(
-        mut config: WarpgateConfig,
+        config: WarpgateConfig,
         admin_token: Option<String>,
         params: GlobalParams,
     ) -> Result<Self> {
-        let db = connect_to_db(&config, &params).await?;
-        populate_db(&db, &mut config).await?;
-        let db = Arc::new(Mutex::new(db));
+        let db = connect_to_db_and_migrate(&config, &params).await?;
+        let recordings = Arc::new(SessionRecordings::new(db.clone(), &params));
 
-        let recordings = SessionRecordings::new(db.clone(), &config, &params)?;
-        let recordings = Arc::new(Mutex::new(recordings));
+        let cluster = Arc::new(Cluster::new(db.clone(), config.store.http.listen.port()).await?);
 
         let config = Arc::new(Mutex::new(config));
 
-        let config_provider = Arc::new(Mutex::new(DatabaseConfigProvider::new(&db).into()));
+        let config_provider = Arc::new(DatabaseConfigProvider::new(&db).into());
 
-        let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new(config_provider.clone())));
+        let login_protection = Arc::new(LoginProtectionService::new(db.clone()).await?);
+
+        let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new()));
 
         tokio::spawn({
             let auth_state_store = auth_state_store.clone();
@@ -57,16 +95,101 @@ impl Services {
         rate_limiter_registry.refresh().await?;
         let rate_limiter_registry = Arc::new(Mutex::new(rate_limiter_registry));
 
+        // Opt-in usage analytics reporter. Always spawned; it re-reads consent
+        // from the DB on every run and reports nothing unless enabled.
+        crate::analytics::start(db.clone());
+
+        // Background cleanup task — always started; cleanup_expired() skips
+        // work (and logs its own summary) when there is something to do, and
+        // re-reads the enabled flag from the DB on each run.
+        {
+            let login_protection = login_protection.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(3600));
+                loop {
+                    interval.tick().await;
+                    if let Err(e) = login_protection.cleanup_expired().await {
+                        warn!("Login protection cleanup failed: {e}");
+                    }
+                }
+            });
+        }
+
         Ok(Self {
             db: db.clone(),
             recordings,
             config: config.clone(),
-            state: State::new(&db, &rate_limiter_registry),
+            state: State::new(&db, &rate_limiter_registry, cluster.node_id),
+            cluster,
             rate_limiter_registry,
             config_provider,
             auth_state_store,
-            admin_token: Arc::new(Mutex::new(admin_token)),
+            admin_token: Arc::new(admin_token.map(Secret::new)),
+            cluster_token: Arc::new(resolve_cluster_token(&db).await?),
+            login_protection,
             global_params: Arc::new(params),
+            listener_status: Arc::default(),
         })
+    }
+
+    /// Resolves the user/policy (without the store lock) and inserts a new
+    /// [`AuthState`] under a brief store lock. This is the only sanctioned way
+    /// to create an auth state, so the "no DB I/O while holding the store lock"
+    /// invariant is enforced structurally rather than by convention.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_auth_state(
+        &self,
+        session_id: &SessionId,
+        username: &str,
+        protocol: Protocol,
+        target_name: &str,
+        supported_credential_types: &[CredentialKind],
+        remote_ip: Option<IpAddr>,
+        rate_limit_credential_type: Option<&str>,
+    ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
+        let (user, policy) = AuthStateStore::resolve_user_and_policy(
+            &self.config_provider,
+            &self.login_protection,
+            username,
+            protocol,
+            supported_credential_types,
+            remote_ip,
+            rate_limit_credential_type,
+        )
+        .await?;
+        Ok(self.auth_state_store.lock().await.create(
+            session_id,
+            &user,
+            protocol,
+            target_name,
+            policy,
+            remote_ip,
+        ))
+    }
+
+    /// Configured web-approval caching window, or `None` if caching is disabled.
+    pub async fn web_approval_grace_period(&self) -> Result<Option<Duration>, WarpgateError> {
+        Ok(Parameters::Entity::get(&self.db)
+            .await?
+            .web_approval_grace_period_seconds
+            .filter(|s| *s > 0)
+            .and_then(|s| u64::try_from(s).ok())
+            .map(Duration::from_secs))
+    }
+
+    /// If a matching web approval is still within the grace period, satisfies the
+    /// pending `WebUserApproval` requirement and logs an audit event
+    pub async fn try_web_approval_bypass(
+        &self,
+        state_arc: &Arc<Mutex<AuthState>>,
+    ) -> Result<bool, WarpgateError> {
+        let Some(grace) = self.web_approval_grace_period().await? else {
+            return Ok(false);
+        };
+        self.auth_state_store
+            .lock()
+            .await
+            .try_web_approval_bypass(state_arc, grace)
+            .await
     }
 }

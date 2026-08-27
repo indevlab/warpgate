@@ -1,42 +1,65 @@
-import { type Recording } from 'admin/lib/api'
+import type { IconDefinition } from '@fortawesome/free-brands-svg-icons'
+import {
+    faArrowRightArrowLeft,
+    faDesktop,
+    faList,
+    faSquare,
+    faTerminal,
+} from '@fortawesome/free-solid-svg-icons'
+import type { Recording } from 'admin/lib/api'
 
-export type RecordingMetadata ={
-    type: 'kubernetes-exec',
-    namespace: string
-    pod: string
-    container: string
-    command: string
-} | {
-    type: 'kubernetes-attach',
-    namespace: string
-    pod: string
-    container: string
-} | {
-    type: 'kubernetes-api',
-} | {
-    type: 'ssh-shell',
-    channel: number
-} | {
-    type: 'ssh-exec',
-    channel: number
-} | {
-    type: 'ssh-direct-tcpip',
-    host: string
-    port: number
-} | {
-    type: 'ssh-direct-socket',
-    path: string
-} | {
-    type: 'ssh-forwarded-tcpip',
-    host: string
-    port: number
-} | {
-    type: 'ssh-forwarded-socket',
-    path: string
-}
+export type RecordingMetadata =
+    | {
+          type: 'kubernetes-exec'
+          namespace: string
+          pod: string
+          container: string
+          command: string
+      }
+    | {
+          type: 'kubernetes-attach'
+          namespace: string
+          pod: string
+          container: string
+      }
+    | {
+          type: 'kubernetes-api'
+      }
+    | {
+          type: 'ssh-shell'
+          channel: number
+      }
+    | {
+          type: 'ssh-exec'
+          channel: number
+      }
+    | {
+          type: 'ssh-direct-tcpip'
+          host: string
+          port: number
+      }
+    | {
+          type: 'ssh-direct-socket'
+          path: string
+      }
+    | {
+          type: 'ssh-forwarded-tcpip'
+          host: string
+          port: number
+      }
+    | {
+          type: 'ssh-forwarded-socket'
+          path: string
+      }
+    | {
+          type: 'desktop'
+          protocol: string
+          target: string
+      }
 
-
-export function recordingMetadataToFieldSet(metadata: RecordingMetadata): [string, string][] {
+export function recordingMetadataToFieldSet(
+    metadata: RecordingMetadata,
+): [string, string][] {
     const fieldSets: [string, string][] = []
 
     switch (metadata.type) {
@@ -66,6 +89,8 @@ export function recordingMetadataToFieldSet(metadata: RecordingMetadata): [strin
         case 'ssh-forwarded-socket':
             fieldSets.push(['Path', metadata.path])
             break
+        case 'desktop':
+            break
     }
 
     return fieldSets
@@ -92,7 +117,37 @@ export function recordingTypeLabel(recording: Recording): string {
             return 'Remote TCP forwarding'
         case 'ssh-forwarded-socket':
             return 'Remote UNIX socket forwarding'
+        case 'desktop':
+            return 'Desktop'
     }
 
     return 'Unknown type'
+}
+
+export function recordingTypeIcon(recording: Recording): IconDefinition {
+    const metadata = JSON.parse(recording.metadata) as RecordingMetadata | null
+    switch (metadata?.type) {
+        case 'kubernetes-api':
+            return faList
+        case 'kubernetes-exec':
+            return faTerminal
+        case 'kubernetes-attach':
+            return faTerminal
+        case 'ssh-shell':
+            return faTerminal
+        case 'ssh-exec':
+            return faTerminal
+        case 'ssh-direct-tcpip':
+            return faArrowRightArrowLeft
+        case 'ssh-direct-socket':
+            return faArrowRightArrowLeft
+        case 'ssh-forwarded-tcpip':
+            return faArrowRightArrowLeft
+        case 'ssh-forwarded-socket':
+            return faArrowRightArrowLeft
+        case 'desktop':
+            return faDesktop
+    }
+
+    return faSquare
 }

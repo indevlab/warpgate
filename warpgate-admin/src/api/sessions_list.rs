@@ -1,18 +1,23 @@
 use futures::{SinkExt, StreamExt};
+use poem::http::StatusCode;
 use poem::session::Session;
-use poem::web::websocket::{Message, WebSocket};
 use poem::web::Data;
-use poem::{handler, IntoResponse};
+use poem::web::websocket::{Message, WebSocket};
+use poem::{IntoResponse, handler};
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
+use sea_orm::prelude::Expr;
+use sea_orm::sea_query::Func;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use tracing::warn;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::SessionSnapshot;
 
 use super::pagination::{PaginatedResponse, PaginationParams};
-use super::AnySecurityScheme;
+use super::{AdminContext, ClusterOrAdminContext};
+use crate::api::cluster_proxy::fan_out_to_peers;
 use crate::api::common::require_admin_permission;
 
 pub struct Api;
@@ -31,22 +36,23 @@ enum CloseAllSessionsResponse {
 
 #[OpenApi]
 impl Api {
+    #[allow(clippy::too_many_arguments)]
     #[oai(path = "/sessions", method = "get", operation_id = "get_sessions")]
+    #[allow(clippy::too_many_arguments)]
     async fn api_get_all_sessions(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         offset: Query<Option<u64>>,
         limit: Query<Option<u64>>,
         active_only: Query<Option<bool>>,
         logged_in_only: Query<Option<bool>>,
         username: Query<Option<String>>,
-        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetSessionsResponse> {
         use warpgate_db_entities::Session;
 
-        require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
+        admin.require(AdminPermission::SessionsView)?;
 
-        let db = ctx.services.db.lock().await;
+        let db = &admin.services().db;
         let mut q = Session::Entity::find().order_by_desc(Session::Column::Started);
 
         if active_only.unwrap_or(false) {
@@ -56,7 +62,10 @@ impl Api {
             q = q.filter(Session::Column::Username.is_not_null());
         }
         if let Some(username_filter) = username.as_ref() {
-            q = q.filter(Session::Column::Username.eq(username_filter.as_str()));
+            q = q.filter(
+                Expr::expr(Func::lower(Expr::col(Session::Column::Username)))
+                    .eq(username_filter.to_lowercase()),
+            );
         }
 
         Ok(GetSessionsResponse::Ok(Json(
@@ -66,7 +75,7 @@ impl Api {
                     limit: *limit,
                     offset: *offset,
                 },
-                &*db,
+                db,
                 Into::into,
             )
             .await?,
@@ -80,22 +89,47 @@ impl Api {
     )]
     async fn api_close_all_sessions(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: ClusterOrAdminContext,
         session: &Session,
-        _sec_scheme: AnySecurityScheme,
+        req: &poem::Request,
+        /// Close only this node's own sessions instead of the whole cluster's.
+        /// Set on cluster-forwarded copies of the request.
+        local_only: Query<Option<bool>>,
     ) -> poem::Result<CloseAllSessionsResponse> {
-        require_admin_permission(&ctx, Some(AdminPermission::SessionsTerminate)).await?;
+        admin.require(AdminPermission::SessionsTerminate)?;
 
-        let state = ctx.services.state.lock().await;
-
-        for s in state.sessions.values() {
-            let mut session = s.lock().await;
-            session.handle.close();
+        {
+            let state = admin.services().state.lock().await;
+            for s in state.sessions.values() {
+                s.lock().await.handle.close();
+            }
         }
 
         session.purge();
 
+        // A session's handle lives only on the node owning its connection, so
+        // the request goes out to every other node too.
+        if !local_only.unwrap_or(false) {
+            close_on_peers(&admin, req).await;
+        }
+
         Ok(CloseAllSessionsResponse::Ok)
+    }
+}
+
+/// Forward the close-all request to every other registered cluster node.
+///
+/// Best effort: a node's sessions get marked ended in the database anyway, so an
+/// unreachable peer is logged, not raised.
+async fn close_on_peers(ctx: &AuthenticatedRequestContext, req: &poem::Request) {
+    // `local_only` stops the peers from fanning out again
+    let path = format!("{}?local_only=true", req.original_uri().path());
+
+    for (hostname, response) in fan_out_to_peers(ctx, req, &path).await {
+        if response.status() != StatusCode::CREATED {
+            let status = response.status();
+            warn!(node = %hostname, %status, "Failed to close sessions on a cluster node");
+        }
     }
 }
 
@@ -106,7 +140,7 @@ pub async fn api_get_sessions_changes_stream(
 ) -> Result<impl IntoResponse, WarpgateError> {
     require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
 
-    let mut receiver = ctx.services.state.lock().await.subscribe();
+    let mut receiver = ctx.services().state.lock().await.subscribe();
 
     Ok(ws
         .on_upgrade(|socket| async move {

@@ -76,6 +76,15 @@ class Child:
     stop_timeout: float
 
 
+# Geometry of the e2e VNC backend (images/vnc-server); passed to the container and
+# asserted by the VNC tests as the size the relay resizes the viewer to.
+VNC_BACKEND_SIZE = (800, 600)
+
+# Framebuffer size Warpgate's RDP helper requests from the target (see
+# warpgate-protocol-rdp `connect()`), i.e. the size desktop frames arrive at.
+RDP_BACKEND_SIZE = (1280, 800)
+
+
 @dataclass
 class WarpgateProcess:
     config_path: Path
@@ -85,6 +94,8 @@ class WarpgateProcess:
     mysql_port: int
     postgres_port: int
     kubernetes_port: int
+    vnc_port: int
+    rdp_port: int
 
 
 class ProcessManager:
@@ -94,8 +105,21 @@ class ProcessManager:
         self.children = []
         self.ctx = ctx
         self.timeout = timeout
+        self._k3s_containers: List[str] = []
+
+    def _remove_k3s_containers(self):
+        """Force-remove every k3s container we've started so far. Idempotent —
+        `docker rm -f` on an already-gone container is a harmless no-op."""
+        for name in self._k3s_containers:
+            subprocess.run(
+                ["docker", "rm", "-f", name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        self._k3s_containers.clear()
 
     def stop(self):
+        self._remove_k3s_containers()
         for child in self.children:
             try:
                 p = psutil.Process(child.process.pid)
@@ -169,10 +193,74 @@ class ProcessManager:
         )
         return port
 
+    def start_minio(self, user, password):
+        port = alloc_port()
+        self.start(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-p",
+                f"{port}:9000",
+                "-e",
+                f"MINIO_ROOT_USER={user}",
+                "-e",
+                f"MINIO_ROOT_PASSWORD={password}",
+                "minio/minio",
+                "server",
+                "/data",
+            ]
+        )
+        return port
+
+    def start_mariadb_server(self):
+        port = alloc_port()
+        self.start(
+            ["docker", "run", "--rm", "-p", f"{port}:3306", "warpgate-e2e-mariadb-server"]
+        )
+        return port
+
     def start_mysql_server(self):
         port = alloc_port()
         self.start(
             ["docker", "run", "--rm", "-p", f"{port}:3306", "warpgate-e2e-mysql-server"]
+        )
+        return port
+
+    def start_vnc_server(self, require_password=False):
+        port = alloc_port()
+        args = [
+            "docker",
+            "run",
+            "--rm",
+            "--name",
+            f"warpgate-e2e-vnc-server-{uuid.uuid4()}",
+            "-p",
+            f"{port}:5900",
+            "-e",
+            f"VNC_GEOMETRY={VNC_BACKEND_SIZE[0]}x{VNC_BACKEND_SIZE[1]}",
+        ]
+        if require_password:
+            args += ["-e", "VNC_SECURITY=VncAuth", "-e", "VNC_PASSWORD=123"]
+        args.append("warpgate-e2e-vnc-server")
+        self.start(args)
+        return port
+
+    def start_rdp_server(self):
+        # Headless RDP backend (images/rdp-server) with a fixed login user:pass of
+        # `user`:`123`. Warpgate authenticates to it over NLA using the target password.
+        port = alloc_port()
+        self.start(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                f"warpgate-e2e-rdp-server-{uuid.uuid4()}",
+                "-p",
+                f"{port}:3389",
+                "warpgate-e2e-rdp-server",
+            ]
         )
         return port
 
@@ -221,7 +309,16 @@ class ProcessManager:
         creates a ServiceAccount and clusterrolebinding, then uses
         `kubectl create token` to fetch the bearer token. Assumes a modern
         k8s version (no fallback logic needed).
+
+        The ProcessManager is session-scoped, so a k3s container would
+        otherwise stay up until the whole run ends. Left running, several of
+        these heavyweight privileged containers pile up across the k8s tests
+        and starve each other; an OOM-killed one is then removed by `--rm` and
+        later `docker exec`s fail with "No such container". Only one is ever
+        needed at a time, so tear down any earlier k3s before starting a fresh
+        one.
         """
+        self._remove_k3s_containers()
         port = alloc_port()
         container_name = f"warpgate-e2e-k3s-{uuid.uuid4()}"
         image = os.getenv("K3S_IMAGE", "rancher/k3s:v1.35.2-k3s1")
@@ -243,6 +340,7 @@ class ProcessManager:
                 "--disable-cloud-controller",
             ]
         )
+        self._k3s_containers.append(container_name)
 
         def wait_k3s():
             # Wait until kube-apiserver is responding
@@ -463,6 +561,8 @@ class ProcessManager:
         extra_scopes=None,
         users_override=None,
         extra_identity_resources=None,
+        redirect_uris=None,
+        extra_clients=None,
     ):
         port = alloc_port()
         container_name = f"warpgate-e2e-oidc-mock-{uuid.uuid4()}"
@@ -488,11 +588,21 @@ class ProcessManager:
                 "AllowedGrantTypes": ["authorization_code"],
                 "AllowedScopes": allowed_scopes,
                 "ClientClaimsPrefix": "",
-                "RedirectUris": [
+                # Emit identity-resource claims (email, preferred_username,
+                # warpgate_roles, ...) directly in the ID token in addition to
+                # the userinfo endpoint.  This is required by the Kubernetes
+                # OIDC-Bearer auth path, which validates a raw ID token and does
+                # not call userinfo.  Harmless for the interactive flows that
+                # also read claims from userinfo.
+                "AlwaysIncludeUserClaimsInIdToken": True,
+                "RedirectUris": redirect_uris or [
                     f"https://127.0.0.1:{warpgate_http_port}/@warpgate/api/sso/return"
                 ],
             }
         ]
+
+        if extra_clients:
+            clients_config.extend(extra_clients)
 
         clients_config_path = oidc_data_dir / "clients-config.json"
         with open(clients_config_path, "w") as f:
@@ -501,6 +611,7 @@ class ProcessManager:
         server_options = _json.dumps(
             {
                 "AccessTokenJwtType": "JWT",
+                "IssuerUri": f"http://localhost:{port}",
                 "Discovery": {"ShowKeySet": True},
                 "Authentication": {
                     "CookieSameSiteMode": "Lax",
@@ -565,7 +676,7 @@ class ProcessManager:
                 "CLIENTS_CONFIGURATION_PATH=/tmp/config/clients-config.json",
                 "-v",
                 f"{oidc_data_dir}:/tmp/config:ro",
-                "ghcr.io/soluto/oidc-server-mock:0.10.1",
+                "xdevsoftware/oidc-server-mock:1.2.6",
             ]
         )
 
@@ -597,22 +708,50 @@ class ProcessManager:
         stderr=None,
         stdout=None,
         http_port=None,
+        database_url=None,
+        env=None,
     ) -> WarpgateProcess:
         args = args or ["run", "--enable-admin-token"]
 
         if share_with:
-            config_path = share_with.config_path
-            ssh_port = share_with.ssh_port
-            mysql_port = share_with.mysql_port
-            postgres_port = share_with.postgres_port
-            http_port = share_with.http_port
-            kubernetes_port = share_with.kubernetes_port
+            import yaml
+
+            # A second node sharing the first's database (and certs/keys) but
+            # listening on its own ports, for multi-node/cluster tests.
+            ssh_port = alloc_port()
+            http_port = alloc_port()
+            mysql_port = alloc_port()
+            postgres_port = alloc_port()
+            kubernetes_port = alloc_port()
+            vnc_port = alloc_port()
+            rdp_port = alloc_port()
+
+            config = yaml.safe_load(share_with.config_path.open())
+            for section, port in [
+                ("ssh", ssh_port),
+                ("http", http_port),
+                ("mysql", mysql_port),
+                ("postgres", postgres_port),
+                ("kubernetes", kubernetes_port),
+                ("vnc", vnc_port),
+                ("rdp", rdp_port),
+            ]:
+                if isinstance(config.get(section), dict):
+                    config[section]["listen"] = f"0.0.0.0:{port}"
+            if config_patch:
+                always_merger.merge(config, config_patch)
+            # Same directory as the shared config so relative DB/cert paths resolve.
+            config_path = share_with.config_path.parent / f"warpgate-{uuid.uuid4()}.yaml"
+            with config_path.open("w") as f:
+                yaml.safe_dump(config, f)
         else:
             ssh_port = alloc_port()
             http_port = http_port or alloc_port()
             mysql_port = alloc_port()
             postgres_port = alloc_port()
             kubernetes_port = alloc_port()
+            vnc_port = alloc_port()
+            rdp_port = alloc_port()
 
             data_dir = self.ctx.tmpdir / f"wg-data-{uuid.uuid4()}"
             data_dir.mkdir(parents=True)
@@ -649,6 +788,7 @@ class ProcessManager:
                     "LLVM_PROFILE_FILE": f"{cargo_root}/target/llvm-cov-target/warpgate-%m.profraw",
                     "WARPGATE_ADMIN_TOKEN": "token-value",
                     "WARPGATE_UNDER_TEST": "1",
+                    "RUST_LOG": "debug",
                     **env,
                 },
                 stop_signal=signal.SIGINT,
@@ -658,24 +798,34 @@ class ProcessManager:
             )
 
         if not share_with:
+            setup_args = [
+                "unattended-setup",
+                "--ssh-port",
+                str(ssh_port),
+                "--http-port",
+                str(http_port),
+                "--mysql-port",
+                str(mysql_port),
+                "--postgres-port",
+                str(postgres_port),
+                "--kubernetes-port",
+                str(kubernetes_port),
+                "--data-path",
+                data_dir,
+                "--external-host",
+                "external-host",
+                # Record all sessions so tests can assert on recordings. Enablement
+                # lives in the DB (seeded from config at setup-time migration), so it
+                # must be set here rather than patched into the config file afterwards.
+                "--record-sessions",
+                # Likewise a DB parameter seeded from the config at setup time.
+                "--host-key-verification",
+                "auto-accept",
+            ]
+            if database_url:
+                setup_args += ["--database-url", database_url]
             p = run(
-                [
-                    "unattended-setup",
-                    "--ssh-port",
-                    str(ssh_port),
-                    "--http-port",
-                    str(http_port),
-                    "--mysql-port",
-                    str(mysql_port),
-                    "--postgres-port",
-                    str(postgres_port),
-                    "--kubernetes-port",
-                    str(kubernetes_port),
-                    "--data-path",
-                    data_dir,
-                    "--external-host",
-                    "external-host",
-                ],
+                setup_args,
                 env={"WARPGATE_ADMIN_PASSWORD": "123"},
             )
             p.communicate()
@@ -685,13 +835,32 @@ class ProcessManager:
             import yaml
 
             config = yaml.safe_load(config_path.open())
-            config["ssh"]["host_key_verification"] = "auto_accept"
+            # unattended-setup has no --vnc-port, so enable the VNC listener here,
+            # reusing the TLS cert/key already copied into the data dir (for VeNCrypt).
+            config["vnc"] = {
+                "enable": True,
+                "listen": f"0.0.0.0:{vnc_port}",
+                "certificate": "tls.certificate.pem",
+                "key": "tls.key.pem",
+            }
+            # Likewise no --rdp-port in unattended-setup; the RDP serve helper
+            # terminates TLS itself, so hand it the same cert/key.
+            config["rdp"] = {
+                "enable": True,
+                "listen": f"0.0.0.0:{rdp_port}",
+                "certificate": "tls.certificate.pem",
+                "key": "tls.key.pem",
+            }
             if config_patch:
                 always_merger.merge(config, config_patch)
             with config_path.open("w") as f:
                 yaml.safe_dump(config, f)
 
-        p = run(args)
+        # A deterministic, reachable self-address so cross-node proxying can find us.
+        p = run(
+            args,
+            env={"WARPGATE_PEER_ADDRESS": f"127.0.0.1:{http_port}", **(env or {})},
+        )
         return WarpgateProcess(
             process=p,
             config_path=config_path,
@@ -700,6 +869,8 @@ class ProcessManager:
             mysql_port=mysql_port,
             postgres_port=postgres_port,
             kubernetes_port=kubernetes_port,
+            vnc_port=vnc_port,
+            rdp_port=rdp_port,
         )
 
     def start_ssh_client(self, *args, password=None, **kwargs):
@@ -791,7 +962,7 @@ def shared_wg(processes: ProcessManager):
 # endpoint.  previously everyone called ``admin_client(url)`` directly;
 # a fixture lets us compute the URL from ``shared_wg`` once and removes
 # boilerplate from individual tests.
-from .api_client import admin_client as _admin_client_context
+from .api_client import admin_client as _admin_client_context  # noqa: E402
 
 
 @pytest.fixture
@@ -846,6 +1017,25 @@ def otp_key_base32():
 @pytest.fixture(scope="session")
 def password_123_hash():
     return "$argon2id$v=19$m=4096,t=3,p=1$cxT6YKZS7r3uBT4nPJXEJQ$GhjTXyGi5vD2H/0X8D3VgJCZSXM4I8GiXRzl4k5ytk0"
+
+
+def rdp_session_authorized(api, username):
+    """Whether Warpgate has an authorized session for `username`.
+
+    Warpgate stamps a session's username only on successful authorization, so this is a
+    direct, client-independent read of the RDP auth verdict (the native RDP client can't
+    observe a post-handshake rejection — see `rdp_client`).
+    """
+    return len(api.get_sessions(username=username).items) > 0
+
+
+def wait_rdp_session_authorized(api, username, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if rdp_session_authorized(api, username):
+            return True
+        time.sleep(0.2)
+    return False
 
 
 logging.basicConfig(level=logging.DEBUG)
